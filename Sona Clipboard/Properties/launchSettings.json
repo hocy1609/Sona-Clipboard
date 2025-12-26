@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Sona Clipboard (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "Sona Clipboard (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
