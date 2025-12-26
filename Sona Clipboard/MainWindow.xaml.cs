@@ -406,4 +406,19 @@ namespace Sona_Clipboard
         private static extern bool SetForegroundWindow(IntPtr hWnd);
         private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, uint uIdSubclass, IntPtr dwRefData);
     }
+    public class TypeToIconConverter : Microsoft.UI.Xaml.Data.IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, string language)
+        {
+            string type = value as string;
+            // Коды иконок из шрифта Segoe MDL2 Assets
+            if (type == "Image") return "\uEB9F"; // Иконка картинки
+            return "\uE8C4"; // Иконка документа (текст)
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, string language)
+        {
+            throw new NotImplementedException();
+        }
+    }
 }
