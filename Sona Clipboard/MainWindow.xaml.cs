@@ -12,6 +12,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Storage;
 using Windows.Storage.Streams;
 using WinRT.Interop;
 
@@ -30,13 +31,12 @@ namespace Sona_Clipboard
         private PreviewWindow _previewWindow;
         private int _currentPreviewIndex = 0;
 
-        // Таймер для проверки "Отпустил ли клавиши?"
         private DispatcherTimer _releaseCheckTimer;
 
         // ID команд
-        private const int ID_OPEN = 9000;
-        private const int ID_NEXT = 9001; // W
-        private const int ID_PREV = 9002; // S
+        // ID_OPEN удален
+        private const int ID_NEXT = 9001;
+        private const int ID_PREV = 9002;
 
         public MainWindow()
         {
@@ -55,47 +55,108 @@ namespace Sona_Clipboard
 
             _previewWindow = new PreviewWindow();
 
-            // Настраиваем таймер проверки клавиш
             _releaseCheckTimer = new DispatcherTimer();
-            _releaseCheckTimer.Interval = TimeSpan.FromMilliseconds(50); // Проверяем 20 раз в секунду
+            _releaseCheckTimer.Interval = TimeSpan.FromMilliseconds(50);
             _releaseCheckTimer.Tick += ReleaseCheckTimer_Tick;
 
             Clipboard.ContentChanged += Clipboard_ContentChanged;
+
+            LoadSettings();
             SetupHotKeys();
         }
 
-        // --- ЛОГИКА "ОТПУСТИЛ - СКОПИРОВАЛ" ---
+        // --- СОХРАНЕНИЕ И ЗАГРУЗКА НАСТРОЕК ---
+        private void SaveSettings()
+        {
+            var settings = ApplicationData.Current.LocalSettings.Values;
+
+            // Настройки "Открыть окно" удалены
+
+            // Сохраняем "Вверх / Старее"
+            settings["HkNextCtrl"] = HkNextCtrl.IsChecked;
+            settings["HkNextShift"] = HkNextShift.IsChecked;
+            settings["HkNextAlt"] = HkNextAlt.IsChecked;
+            settings["HkNextKey"] = HkNextKey.SelectedIndex;
+
+            // Сохраняем "Вниз / Новее"
+            settings["HkPrevCtrl"] = HkPrevCtrl.IsChecked;
+            settings["HkPrevShift"] = HkPrevShift.IsChecked;
+            settings["HkPrevAlt"] = HkPrevAlt.IsChecked;
+            settings["HkPrevKey"] = HkPrevKey.SelectedIndex;
+
+            // Сохраняем лимит истории
+            settings["HistoryLimit"] = HistoryLimitBox.Text;
+        }
+
+        private void LoadSettings()
+        {
+            var settings = ApplicationData.Current.LocalSettings.Values;
+
+            bool GetBool(string key, bool defaultValue)
+            {
+                return settings.ContainsKey(key) ? (bool)settings[key] : defaultValue;
+            }
+            int GetInt(string key, int defaultValue)
+            {
+                return settings.ContainsKey(key) ? (int)settings[key] : defaultValue;
+            }
+
+            // Настройки "Открыть окно" удалены
+
+            HkNextCtrl.IsChecked = GetBool("HkNextCtrl", false);
+            HkNextShift.IsChecked = GetBool("HkNextShift", false);
+            HkNextAlt.IsChecked = GetBool("HkNextAlt", false);
+            HkNextKey.SelectedIndex = GetInt("HkNextKey", 22); // W
+
+            HkPrevCtrl.IsChecked = GetBool("HkPrevCtrl", false);
+            HkPrevShift.IsChecked = GetBool("HkPrevShift", false);
+            HkPrevAlt.IsChecked = GetBool("HkPrevAlt", false);
+            HkPrevKey.SelectedIndex = GetInt("HkPrevKey", 18); // S
+
+            if (settings.ContainsKey("HistoryLimit"))
+            {
+                HistoryLimitBox.Text = settings["HistoryLimit"].ToString();
+            }
+        }
+
+        // --- ЛОГИКА "ОТПУСТИЛ - СКОПИРОВАЛ - ВСТАВИЛ" ---
         private void ReleaseCheckTimer_Tick(object sender, object e)
         {
-            // Проверяем, нажаты ли модификаторы (Ctrl, Shift, Alt)
-            // GetAsyncKeyState возвращает < 0 если клавиша нажата
-            bool ctrlPressed = (GetAsyncKeyState(0x11) & 0x8000) != 0;  // VK_CONTROL
-            bool shiftPressed = (GetAsyncKeyState(0x10) & 0x8000) != 0; // VK_SHIFT
-            bool altPressed = (GetAsyncKeyState(0x12) & 0x8000) != 0;   // VK_MENU
+            bool ctrlPressed = (GetAsyncKeyState(0x11) & 0x8000) != 0;
+            bool shiftPressed = (GetAsyncKeyState(0x10) & 0x8000) != 0;
+            bool altPressed = (GetAsyncKeyState(0x12) & 0x8000) != 0;
 
-            // Если НИ ОДИН из модификаторов не нажат - значит пользователь отпустил комбинацию
             if (!ctrlPressed && !shiftPressed && !altPressed)
             {
-                // Останавливаем таймер
                 _releaseCheckTimer.Stop();
-
-                // Копируем то, что сейчас выбрано
                 if (_previewWindow.Visible && _fullHistory.Count > _currentPreviewIndex)
                 {
                     var item = _fullHistory[_currentPreviewIndex];
                     CopyToClipboard(item);
-                    _previewWindow.Hide(); // Прячем окно
+                    _previewWindow.Hide();
+                    _ = PasteSelection();
                 }
             }
         }
 
+        private async Task PasteSelection()
+        {
+            await Task.Delay(150);
+            keybd_event(0x11, 0, 0, 0); // Ctrl Down
+            keybd_event(0x56, 0, 0, 0); // V Down
+            keybd_event(0x56, 0, 0x0002, 0); // V Up
+            keybd_event(0x11, 0, 0x0002, 0); // Ctrl Up
+        }
+
+        [DllImport("user32.dll")]
+        static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
         [DllImport("user32.dll")]
         static extern short GetAsyncKeyState(int vKey);
 
-        // --- ЛОГИКА ГОРЯЧИХ КЛАВИШ ---
+        // --- ГОРЯЧИЕ КЛАВИШИ ---
         private void SetupHotKeys()
         {
-            HotKeyHelper.Unregister(_hWnd, ID_OPEN);
+            // HotKeyHelper.Unregister(_hWnd, ID_OPEN); // Удалено
             HotKeyHelper.Unregister(_hWnd, ID_NEXT);
             HotKeyHelper.Unregister(_hWnd, ID_PREV);
             RegisterHotKeysFromUI();
@@ -105,7 +166,7 @@ namespace Sona_Clipboard
                 SetWindowSubclass(_hWnd, _subclassDelegate, 0, IntPtr.Zero);
             }
             this.Closed += (s, e) => {
-                HotKeyHelper.Unregister(_hWnd, ID_OPEN);
+                // HotKeyHelper.Unregister(_hWnd, ID_OPEN); // Удалено
                 HotKeyHelper.Unregister(_hWnd, ID_NEXT);
                 HotKeyHelper.Unregister(_hWnd, ID_PREV);
                 _previewWindow.Close();
@@ -114,7 +175,7 @@ namespace Sona_Clipboard
 
         private void RegisterHotKeysFromUI()
         {
-            RegisterSingleKey(ID_OPEN, HkOpenCtrl, HkOpenShift, HkOpenAlt, HkOpenKey);
+            // RegisterSingleKey(ID_OPEN, HkOpenCtrl, HkOpenShift, HkOpenAlt, HkOpenKey); // Удалено
             RegisterSingleKey(ID_NEXT, HkNextCtrl, HkNextShift, HkNextAlt, HkNextKey);
             RegisterSingleKey(ID_PREV, HkPrevCtrl, HkPrevShift, HkPrevAlt, HkPrevKey);
         }
@@ -135,18 +196,9 @@ namespace Sona_Clipboard
             if (uMsg == WM_HOTKEY)
             {
                 int id = wParam.ToInt32();
-                if (id == ID_OPEN)
-                {
-                    ToggleWindowVisibility();
-                }
-                else if (id == ID_NEXT)
-                { // W (Вверх/Старее)
-                    ShowPreview(goDeeper: true);
-                }
-                else if (id == ID_PREV)
-                { // S (Вниз/Новее)
-                    ShowPreview(goDeeper: false);
-                }
+                // if (id == ID_OPEN) ToggleWindowVisibility(); // Удалено
+                if (id == ID_NEXT) ShowPreview(goDeeper: true);
+                else if (id == ID_PREV) ShowPreview(goDeeper: false);
                 return IntPtr.Zero;
             }
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
@@ -155,18 +207,15 @@ namespace Sona_Clipboard
         private void ShowPreview(bool goDeeper)
         {
             if (_fullHistory.Count == 0) return;
-
-            // Если окно только открывается - запускаем слежку за отпусканием клавиш
             if (_previewWindow.Visible == false)
             {
                 _currentPreviewIndex = 0;
-                _releaseCheckTimer.Start(); // <--- СТАРТ ТАЙМЕРА
+                _releaseCheckTimer.Start();
             }
             else
             {
                 if (goDeeper) _currentPreviewIndex++; else _currentPreviewIndex--;
             }
-
             if (_currentPreviewIndex < 0) _currentPreviewIndex = 0;
             if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = _fullHistory.Count - 1;
 
@@ -174,7 +223,6 @@ namespace Sona_Clipboard
             _previewWindow.ShowItem(item, _currentPreviewIndex + 1);
         }
 
-        // --- ЛОГИКА ---
         private void ToggleWindowVisibility()
         {
             if (this.Visible) { _appWindow.Hide(); }
@@ -316,12 +364,23 @@ namespace Sona_Clipboard
         private void SettingsButton_Click(object sender, RoutedEventArgs e) { HistoryView.Visibility = Visibility.Collapsed; SettingsView.Visibility = Visibility.Visible; DbPathText.Text = _dbPath; }
         private void BackButton_Click(object sender, RoutedEventArgs e) { SettingsView.Visibility = Visibility.Collapsed; HistoryView.Visibility = Visibility.Visible; }
         private void OpenFolder_Click(object sender, RoutedEventArgs e) { try { System.Diagnostics.Process.Start("explorer.exe", AppDomain.CurrentDomain.BaseDirectory); } catch { } }
+
+        // --- СОХРАНЯЕМ ПРИ НАЖАТИИ КНОПКИ ---
         private void ApplyHotKeys_Click(object sender, RoutedEventArgs e)
         {
-            HotKeyHelper.Unregister(_hWnd, ID_OPEN); HotKeyHelper.Unregister(_hWnd, ID_NEXT); HotKeyHelper.Unregister(_hWnd, ID_PREV);
-            RegisterHotKeysFromUI(); MaintenanceStatus.Text = "Горячие клавиши обновлены!";
+            // HotKeyHelper.Unregister(_hWnd, ID_OPEN); // Удалено
+            HotKeyHelper.Unregister(_hWnd, ID_NEXT); HotKeyHelper.Unregister(_hWnd, ID_PREV);
+            RegisterHotKeysFromUI();
+            SaveSettings(); // <--- Сохраняем настройки
+            MaintenanceStatus.Text = "Настройки сохранены и применены!";
         }
-        private void ApplyLimit_Click(object sender, RoutedEventArgs e) { TrimHistory(); MaintenanceStatus.Text = $"Лимит применен"; }
+
+        private void ApplyLimit_Click(object sender, RoutedEventArgs e)
+        {
+            TrimHistory();
+            SaveSettings(); // <--- Сохраняем настройки при смене лимита
+            MaintenanceStatus.Text = $"Лимит применен";
+        }
 
         private void TrimHistory()
         {
@@ -411,11 +470,9 @@ namespace Sona_Clipboard
         public object Convert(object value, Type targetType, object parameter, string language)
         {
             string type = value as string;
-            // Коды иконок из шрифта Segoe MDL2 Assets
-            if (type == "Image") return "\uEB9F"; // Иконка картинки
-            return "\uE8C4"; // Иконка документа (текст)
+            if (type == "Image") return "\uEB9F";
+            return "\uE8C4";
         }
-
         public object ConvertBack(object value, Type targetType, object parameter, string language)
         {
             throw new NotImplementedException();

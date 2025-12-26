@@ -71,7 +71,7 @@ namespace Sona_Clipboard
             this.Activate();
         }
 
-        // Умное позиционирование (над или под курсором)
+        // Умное позиционирование (над/под и слева/справа от курсора)
         private void SmartMoveToCursor()
         {
             GetCursorPos(out POINT lpPoint);
@@ -80,17 +80,35 @@ namespace Sona_Clipboard
             WindowId windowId = Win32Interop.GetWindowIdFromWindow(hWnd);
             DisplayArea displayArea = DisplayArea.GetFromPoint(new Windows.Graphics.PointInt32(lpPoint.X, lpPoint.Y), DisplayAreaFallback.Nearest);
 
+            // Получаем границы рабочего экрана
+            int screenW = displayArea.WorkArea.Width;
             int screenH = displayArea.WorkArea.Height;
+            int screenX = displayArea.WorkArea.X;
             int screenY = displayArea.WorkArea.Y;
 
+            // Базовая позиция (справа-снизу от мышки с отступом 20px)
             int targetX = lpPoint.X + 20;
             int targetY = lpPoint.Y + 20;
 
-            // Если окно не влезает снизу, рисуем сверху
-            if (lpPoint.Y > (screenY + screenH / 2) || (targetY + WIN_HEIGHT > screenY + screenH))
+            // --- ПРОВЕРКА ПО ГОРИЗОНТАЛИ (X) ---
+            // Если правый край окна вылезает за экран
+            if (targetX + WIN_WIDTH > screenX + screenW)
             {
+                // Ставим окно СЛЕВА от курсора
+                targetX = lpPoint.X - WIN_WIDTH - 20;
+            }
+
+            // --- ПРОВЕРКА ПО ВЕРТИКАЛИ (Y) ---
+            // Если нижний край окна вылезает за экран
+            if (targetY + WIN_HEIGHT > screenY + screenH)
+            {
+                // Ставим окно СВЕРХУ от курсора
                 targetY = lpPoint.Y - WIN_HEIGHT - 20;
             }
+
+            // Финальная страховка (чтобы не улетело в минус за левый/верхний край)
+            if (targetX < screenX) targetX = screenX;
+            if (targetY < screenY) targetY = screenY;
 
             _appWindow.Move(new Windows.Graphics.PointInt32(targetX, targetY));
         }
