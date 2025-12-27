@@ -1,26 +1,34 @@
+using H.NotifyIcon; // Библиотека трея
 using Microsoft.Data.Sqlite;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input; // Нужно для StandardUICommand
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.WindowsRuntime;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.Storage.Streams;
 using WinRT.Interop;
-using System.Text.Json;
+using System.Windows.Input; // Исправляет ошибку ICommand
+using System.Runtime.InteropServices.WindowsRuntime; // Исправляет ошибку AsBuffer
 
 namespace Sona_Clipboard
 {
     public sealed partial class MainWindow : Window
     {
+        // --- Поля для трея и первого запуска ---
+        public StandardUICommand ShowWindowCommand { get; }
+        private bool _isFirstRunInternal = true; // Хранит состояние в памяти
+        // ---------------------------------------
+
         private bool _isCopiedByMe = false;
         private string _dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SonaClipboard.db");
         private List<ClipboardItem> _fullHistory = new List<ClipboardItem>();
@@ -29,7 +37,6 @@ namespace Sona_Clipboard
         private AppWindow? _appWindow;
 
         private SubclassProc? _subclassDelegate;
-
         private PreviewWindow _previewWindow;
 
         // Индекс текущего элемента
@@ -44,25 +51,23 @@ namespace Sona_Clipboard
         {
             this.InitializeComponent();
 
+            // 1. Инициализация команды для клика по иконке в трее
+            ShowWindowCommand = new StandardUICommand(StandardUICommandKind.None);
+            ShowWindowCommand.ExecuteRequested += (s, e) => ShowWindow();
+
             _hWnd = WindowNative.GetWindowHandle(this);
             WindowId windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
             _appWindow = AppWindow.GetFromWindowId(windowId);
 
-            // --- 1. ВАЖНО: Установка названия окна ---
+            // --- Установка названия окна ---
             this.Title = "Sona Clipboard";
-            _appWindow.Title = "Sona Clipboard";
-            // -----------------------------------------
+            if (_appWindow != null) _appWindow.Title = "Sona Clipboard";
 
-            // --- 2. Установка иконки ---
+            // --- Установка иконки окна ---
             try
             {
-                // ИСПРАВЛЕНО: Убрали "Assets", так как файл лежит рядом с exe
                 var iconPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "favicon.ico");
-
-                // На всякий случай проверим в отладке, тот ли это путь
-                System.Diagnostics.Debug.WriteLine("Ищу иконку тут: " + iconPath);
-
-                _appWindow.SetIcon(iconPath);
+                if (_appWindow != null) _appWindow.SetIcon(iconPath);
             }
             catch (Exception ex)
             {
@@ -86,7 +91,141 @@ namespace Sona_Clipboard
 
             LoadSettings();
             SetupHotKeys();
+
+            // --- ВАЖНО: Перехват закрытия окна (сворачивание в трей) ---
+            this.Closed += MainWindow_Closed;
+
+            // --- Проверка первого запуска ---
+            if (this.Content is FrameworkElement content)
+            {
+                content.Loaded += (s, e) => CheckFirstRun();
+            }
+
+            SetupHotKeys();
+            this.Closed += MainWindow_Closed;
+
+            // Просто вызываем проверку. Она сама решит, показывать окно или нет.
+            CheckFirstRun();
         }
+
+        // ==========================================
+        // ЛОГИКА ТРЕЯ И ЗАПУСКА
+        // ==========================================
+
+        private async void CheckFirstRun()
+        {
+            // Загружаем настройки, чтобы проверить флаг
+            LoadSettings();
+
+            if (_isFirstRunInternal)
+            {
+                // 1. Принудительно показываем окно, так как диалогу нужен "родитель"
+                this.Activate();
+
+                // 2. Ждем, пока у окна появится XamlRoot (оно прогрузится)
+                if (this.Content is FrameworkElement content)
+                {
+                    // Если XamlRoot еще нет, ждем события Loaded
+                    if (content.XamlRoot == null)
+                    {
+                        var tcs = new TaskCompletionSource<bool>();
+                        RoutedEventHandler handler = (s, e) => tcs.TrySetResult(true);
+                        content.Loaded += handler;
+                        await tcs.Task;
+                        content.Loaded -= handler;
+                    }
+                }
+
+                // 3. Создаем и показываем диалог
+                ContentDialog dialog = new ContentDialog
+                {
+                    Title = "Sona Clipboard запущена!",
+                    Content = "Программа теперь живет в системном трее (возле часов).\n\nНажмите на иконку или используйте горячие клавиши (Alt+A и т.д.), чтобы открыть историю.",
+                    CloseButtonText = "Понятно",
+                    XamlRoot = this.Content.XamlRoot
+                };
+
+                await dialog.ShowAsync();
+
+                // 4. Как только нажали "Понятно" — прячем окно и сохраняем настройки
+                _isFirstRunInternal = false;
+                SaveSettings();
+                this.Hide();
+            }
+            else
+            {
+                // ЭТО ОБЫЧНЫЙ ЗАПУСК
+                // Мы НЕ вызывали this.Activate(), поэтому окно создалось, 
+                // иконка в трее появилась, но само черное окно на экране не вылезет.
+            }
+        }
+
+        private void ShowWindow()
+        {
+            // 1. Принудительно показываем окно через Win32 API
+            Win32ShowWindow(_hWnd, SW_SHOW);
+
+            // 2. Если окно свернуто — восстанавливаем
+            Win32ShowWindow(_hWnd, SW_RESTORE);
+
+            // 3. Пытаемся получить AppWindow заново (на случай, если ссылка протухла)
+            WindowId windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
+            AppWindow? appWindow = AppWindow.GetFromWindowId(windowId);
+
+            if (appWindow != null)
+            {
+                appWindow.Show(); // Самый важный метод WinUI 3
+
+                if (appWindow.Presenter is OverlappedPresenter presenter)
+                {
+                    // Форсируем восстановление из любого состояния
+                    if (presenter.State == OverlappedPresenterState.Minimized)
+                    {
+                        presenter.Restore();
+                    }
+                }
+            }
+
+            // 4. "Магическая" функция, которая переключает фокус на окно (лучше, чем SetForegroundWindow)
+            SwitchToThisWindow(_hWnd, true);
+
+            // 5. Финальный аккорд
+            this.Activate();
+        }
+
+        private void MainWindow_Closed(object sender, WindowEventArgs args)
+        {
+            // ОТМЕНЯЕМ закрытие
+            args.Handled = true;
+            // Просто прячем окно
+            this.Hide();
+        }
+
+        // Метод для контекстного меню "Открыть"
+        private void Open_Click(object sender, RoutedEventArgs e)
+        {
+            ShowWindow();
+        }
+
+        // Метод для контекстного меню "Выход"
+        private void Exit_Click(object sender, RoutedEventArgs e)
+        {
+            // Отписываемся от события, чтобы окно реально закрылось
+            this.Closed -= MainWindow_Closed;
+
+            // Закрываем превью, если есть
+            _previewWindow?.Close();
+
+            // Закрываем главное окно
+            this.Close();
+
+            // Убиваем процесс полностью
+            Environment.Exit(0);
+        }
+
+        // ==========================================
+        // ОСТАЛЬНОЙ КОД
+        // ==========================================
 
         private async void ReleaseCheckTimer_Tick(object? sender, object e)
         {
@@ -134,11 +273,7 @@ namespace Sona_Clipboard
                 SetWindowSubclass(_hWnd, _subclassDelegate, 0, IntPtr.Zero);
             }
 
-            this.Closed += (s, e) => {
-                HotKeyHelper.Unregister(_hWnd, ID_NEXT);
-                HotKeyHelper.Unregister(_hWnd, ID_PREV);
-                _previewWindow.Close();
-            };
+            // Убрал закрытие здесь, так как оно теперь обрабатывается в Exit_Click
         }
 
         private void RegisterHotKeysFromUI()
@@ -367,49 +502,10 @@ namespace Sona_Clipboard
             UpdateListUI();
         }
 
-        private void SaveSettings()
-        {
-            try
-            {
-                var data = new AppSettingsData
-                {
-                    HkNextCtrl = HkNextCtrl.IsChecked == true,
-                    HkNextShift = HkNextShift.IsChecked == true,
-                    HkNextAlt = HkNextAlt.IsChecked == true,
-                    HkNextKey = HkNextKey.SelectedIndex,
+        // ==========================================
+        // НАСТРОЙКИ
+        // ==========================================
 
-                    HkPrevCtrl = HkPrevCtrl.IsChecked == true,
-                    HkPrevShift = HkPrevShift.IsChecked == true,
-                    HkPrevAlt = HkPrevAlt.IsChecked == true,
-                    HkPrevKey = HkPrevKey.SelectedIndex,
-
-                    HistoryLimit = HistoryLimitBox.Text
-                };
-
-                // Убедимся, что папка существует (с защитой от null)
-                string? folder = Path.GetDirectoryName(SettingsPath);
-                if (folder != null && !Directory.Exists(folder))
-                {
-                    Directory.CreateDirectory(folder);
-                }
-
-                // Сохраняем в JSON
-                string json = JsonSerializer.Serialize(data);
-                File.WriteAllText(SettingsPath, json);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine("Ошибка сохранения: " + ex.Message);
-            }
-        }
-
-        // 1. Путь к файлу настроек
-        private string SettingsPath => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SonaClipboard",
-            "settings.json");
-
-        // 2. Класс для хранения данных (простая структура)
         public class AppSettingsData
         {
             public bool HkNextCtrl { get; set; }
@@ -422,15 +518,21 @@ namespace Sona_Clipboard
             public bool HkPrevAlt { get; set; }
             public int HkPrevKey { get; set; } = 18;
 
-            public string HistoryLimit { get; set; } = "20"; // Дефолтное значение
+            public string HistoryLimit { get; set; } = "20";
+
+            // Новое поле для первого запуска
+            public bool IsFirstRun { get; set; } = true;
         }
 
-        // 3. Новый метод загрузки
+        private string SettingsPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SonaClipboard",
+            "settings.json");
+
         private void LoadSettings()
         {
             try
             {
-                // Если файла нет — просто выходим (будут настройки по умолчанию из XAML)
                 if (!File.Exists(SettingsPath)) return;
 
                 string json = File.ReadAllText(SettingsPath);
@@ -449,12 +551,51 @@ namespace Sona_Clipboard
                     HkPrevKey.SelectedIndex = data.HkPrevKey;
 
                     HistoryLimitBox.Text = data.HistoryLimit;
+
+                    // Загружаем состояние "Первого запуска" в переменную
+                    _isFirstRunInternal = data.IsFirstRun;
                 }
             }
             catch (Exception ex)
             {
-                // Если файл битый, просто игнорируем ошибку, чтобы прога открылась
                 System.Diagnostics.Debug.WriteLine("Ошибка чтения настроек: " + ex.Message);
+            }
+        }
+
+        private void SaveSettings()
+        {
+            try
+            {
+                var data = new AppSettingsData
+                {
+                    HkNextCtrl = HkNextCtrl.IsChecked == true,
+                    HkNextShift = HkNextShift.IsChecked == true,
+                    HkNextAlt = HkNextAlt.IsChecked == true,
+                    HkNextKey = HkNextKey.SelectedIndex,
+
+                    HkPrevCtrl = HkPrevCtrl.IsChecked == true,
+                    HkPrevShift = HkPrevShift.IsChecked == true,
+                    HkPrevAlt = HkPrevAlt.IsChecked == true,
+                    HkPrevKey = HkPrevKey.SelectedIndex,
+
+                    HistoryLimit = HistoryLimitBox.Text,
+
+                    // СОХРАНЯЕМ ТЕКУЩЕЕ СОСТОЯНИЕ (чтобы не сбросить в true)
+                    IsFirstRun = _isFirstRunInternal
+                };
+
+                string? folder = Path.GetDirectoryName(SettingsPath);
+                if (folder != null && !Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                string json = JsonSerializer.Serialize(data);
+                File.WriteAllText(SettingsPath, json);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Ошибка сохранения: " + ex.Message);
             }
         }
 
@@ -483,10 +624,7 @@ namespace Sona_Clipboard
         {
             IntPtr hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
             WindowId windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hWnd);
-
-            // --- ИСПРАВЛЕНИЕ ЗДЕСЬ (AppWindow может быть null) ---
             AppWindow? appWindow = AppWindow.GetFromWindowId(windowId);
-
             if (appWindow != null)
             {
                 DisplayArea? displayArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary);
@@ -500,9 +638,24 @@ namespace Sona_Clipboard
             }
         }
 
-        [DllImport("comctl32.dll", SetLastError = true)] private static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc? pfnSubclass, uint uIdSubclass, IntPtr dwRefData);
-        [DllImport("comctl32.dll", SetLastError = true)] private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
-        [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+        [DllImport("comctl32.dll", SetLastError = true)]
+        private static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc? pfnSubclass, uint uIdSubclass, IntPtr dwRefData);
+
+        [DllImport("comctl32.dll", SetLastError = true)]
+        private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        static extern short GetAsyncKeyState(int vKey);
+
+        // ПЕРЕИМЕНОВАЛИ В Win32ShowWindow, ЧТОБЫ ИЗБЕЖАТЬ КОНФЛИКТА
+        [DllImport("user32.dll", EntryPoint = "ShowWindow")]
+        private static extern bool Win32ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab); // <--- ДОБАВИТЬ ЭТО
+
+        private const int SW_SHOW = 5;
+        private const int SW_RESTORE = 9;
         private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, uint uIdSubclass, IntPtr dwRefData);
 
         [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);

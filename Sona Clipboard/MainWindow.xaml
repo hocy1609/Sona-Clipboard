@@ -5,6 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:local="using:Sona_Clipboard"
+    xmlns:tb="using:H.NotifyIcon"
     mc:Ignorable="d">
 
     <Window.SystemBackdrop>
@@ -20,6 +21,25 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
+
+        <Grid>
+            <tb:TaskbarIcon 
+                x:Name="TrayIcon"
+                IconSource="/favicon.ico"
+                ToolTipText="Sona Clipboard"
+                DoubleClickCommand="{x:Bind ShowWindowCommand}" 
+                >
+
+                <tb:TaskbarIcon.ContextFlyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem Text="Открыть" Click="Open_Click" />
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Text="Выход" Click="Exit_Click" />
+                    </MenuFlyout>
+                </tb:TaskbarIcon.ContextFlyout>
+            </tb:TaskbarIcon>
+
+        </Grid>
 
         <Grid x:Name="AppTitleBar" Height="40" Background="Transparent" Padding="15,0">
             <TextBlock Text="Sona Clipboard" VerticalAlignment="Center" FontSize="14" FontWeight="SemiBold"/>
