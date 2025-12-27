@@ -15,6 +15,7 @@ using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.Storage.Streams;
 using WinRT.Interop;
+using System.Text.Json;
 
 namespace Sona_Clipboard
 {
@@ -347,33 +348,93 @@ namespace Sona_Clipboard
 
         private void SaveSettings()
         {
-            var settings = ApplicationData.Current.LocalSettings.Values;
-            settings["HkNextCtrl"] = HkNextCtrl.IsChecked;
-            settings["HkNextShift"] = HkNextShift.IsChecked;
-            settings["HkNextAlt"] = HkNextAlt.IsChecked;
-            settings["HkNextKey"] = HkNextKey.SelectedIndex;
-            settings["HkPrevCtrl"] = HkPrevCtrl.IsChecked;
-            settings["HkPrevShift"] = HkPrevShift.IsChecked;
-            settings["HkPrevAlt"] = HkPrevAlt.IsChecked;
-            settings["HkPrevKey"] = HkPrevKey.SelectedIndex;
-            settings["HistoryLimit"] = HistoryLimitBox.Text;
+            try
+            {
+                var data = new AppSettingsData
+                {
+                    HkNextCtrl = HkNextCtrl.IsChecked == true,
+                    HkNextShift = HkNextShift.IsChecked == true,
+                    HkNextAlt = HkNextAlt.IsChecked == true,
+                    HkNextKey = HkNextKey.SelectedIndex,
+
+                    HkPrevCtrl = HkPrevCtrl.IsChecked == true,
+                    HkPrevShift = HkPrevShift.IsChecked == true,
+                    HkPrevAlt = HkPrevAlt.IsChecked == true,
+                    HkPrevKey = HkPrevKey.SelectedIndex,
+
+                    HistoryLimit = HistoryLimitBox.Text
+                };
+
+                // Убедимся, что папка существует (с защитой от null)
+                string? folder = Path.GetDirectoryName(SettingsPath);
+                if (folder != null && !Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                // Сохраняем в JSON
+                string json = JsonSerializer.Serialize(data);
+                File.WriteAllText(SettingsPath, json);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Ошибка сохранения: " + ex.Message);
+            }
         }
 
+        // 1. Путь к файлу настроек
+        private string SettingsPath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SonaClipboard",
+            "settings.json");
+
+        // 2. Класс для хранения данных (простая структура)
+        public class AppSettingsData
+        {
+            public bool HkNextCtrl { get; set; }
+            public bool HkNextShift { get; set; }
+            public bool HkNextAlt { get; set; }
+            public int HkNextKey { get; set; } = 22;
+
+            public bool HkPrevCtrl { get; set; }
+            public bool HkPrevShift { get; set; }
+            public bool HkPrevAlt { get; set; }
+            public int HkPrevKey { get; set; } = 18;
+
+            public string HistoryLimit { get; set; } = "20"; // Дефолтное значение
+        }
+
+        // 3. Новый метод загрузки
         private void LoadSettings()
         {
-            var settings = ApplicationData.Current.LocalSettings.Values;
-            bool GetBool(string key, bool defaultValue) => settings.ContainsKey(key) ? (bool)settings[key] : defaultValue;
-            int GetInt(string key, int defaultValue) => settings.ContainsKey(key) ? (int)settings[key] : defaultValue;
+            try
+            {
+                // Если файла нет — просто выходим (будут настройки по умолчанию из XAML)
+                if (!File.Exists(SettingsPath)) return;
 
-            HkNextCtrl.IsChecked = GetBool("HkNextCtrl", false);
-            HkNextShift.IsChecked = GetBool("HkNextShift", false);
-            HkNextAlt.IsChecked = GetBool("HkNextAlt", false);
-            HkNextKey.SelectedIndex = GetInt("HkNextKey", 22);
-            HkPrevCtrl.IsChecked = GetBool("HkPrevCtrl", false);
-            HkPrevShift.IsChecked = GetBool("HkPrevShift", false);
-            HkPrevAlt.IsChecked = GetBool("HkPrevAlt", false);
-            HkPrevKey.SelectedIndex = GetInt("HkPrevKey", 18);
-            if (settings.ContainsKey("HistoryLimit")) HistoryLimitBox.Text = settings["HistoryLimit"].ToString();
+                string json = File.ReadAllText(SettingsPath);
+                var data = JsonSerializer.Deserialize<AppSettingsData>(json);
+
+                if (data != null)
+                {
+                    HkNextCtrl.IsChecked = data.HkNextCtrl;
+                    HkNextShift.IsChecked = data.HkNextShift;
+                    HkNextAlt.IsChecked = data.HkNextAlt;
+                    HkNextKey.SelectedIndex = data.HkNextKey;
+
+                    HkPrevCtrl.IsChecked = data.HkPrevCtrl;
+                    HkPrevShift.IsChecked = data.HkPrevShift;
+                    HkPrevAlt.IsChecked = data.HkPrevAlt;
+                    HkPrevKey.SelectedIndex = data.HkPrevKey;
+
+                    HistoryLimitBox.Text = data.HistoryLimit;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Если файл битый, просто игнорируем ошибку, чтобы прога открылась
+                System.Diagnostics.Debug.WriteLine("Ошибка чтения настроек: " + ex.Message);
+            }
         }
 
         private void SettingsButton_Click(object sender, RoutedEventArgs e) { HistoryView.Visibility = Visibility.Collapsed; SettingsView.Visibility = Visibility.Visible; DbPathText.Text = _dbPath; }
