@@ -48,6 +48,21 @@ namespace Sona_Clipboard
             WindowId windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
             _appWindow = AppWindow.GetFromWindowId(windowId);
 
+            // --- НАЧАЛО: Установка иконки ---
+            try
+            {
+                // Строим путь к файлу app.ico в папке Assets рядом с exe
+                var iconPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "Assets", "app.ico");
+
+                // Устанавливаем иконку для окна
+                _appWindow.SetIcon(iconPath);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Не удалось загрузить иконку: " + ex.Message);
+            }
+            // --- КОНЕЦ: Установка иконки ---
+
             ExtendsContentIntoTitleBar = true;
             SetTitleBar(AppTitleBar);
             CenterWindow();

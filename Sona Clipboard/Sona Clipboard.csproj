@@ -14,7 +14,9 @@
     
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     
-    <PublishTrimmed>False</PublishTrimmed> 
+    <PublishTrimmed>False</PublishTrimmed>
+    
+    <ApplicationIcon>favicon.ico</ApplicationIcon> 
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +27,7 @@
     <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
     <Content Include="Assets\StoreLogo.png" />
     <Content Include="Assets\Wide310x150Logo.scale-200.png" />
+    <Content Include="favicon.ico" />
   </ItemGroup>
 
   <ItemGroup>
