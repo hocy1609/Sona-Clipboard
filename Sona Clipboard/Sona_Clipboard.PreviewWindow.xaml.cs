@@ -37,7 +37,7 @@ namespace Sona_Clipboard
         }
 
         // Этот метод нужен, чтобы главное окно могло скрывать превью
-        public new void Hide()
+        public void Hide()
         {
             _appWindow.Hide();
         }

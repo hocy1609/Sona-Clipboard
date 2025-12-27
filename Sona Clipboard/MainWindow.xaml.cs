@@ -25,16 +25,17 @@ namespace Sona_Clipboard
         private List<ClipboardItem> _fullHistory = new List<ClipboardItem>();
 
         private IntPtr _hWnd;
-        private AppWindow _appWindow;
-        private SubclassProc _subclassDelegate;
+        private AppWindow? _appWindow;
+
+        private SubclassProc? _subclassDelegate;
 
         private PreviewWindow _previewWindow;
+
+        // Индекс текущего элемента
         private int _currentPreviewIndex = 0;
 
         private DispatcherTimer _releaseCheckTimer;
 
-        // ID команд
-        // ID_OPEN удален
         private const int ID_NEXT = 9001;
         private const int ID_PREV = 9002;
 
@@ -65,108 +66,53 @@ namespace Sona_Clipboard
             SetupHotKeys();
         }
 
-        // --- СОХРАНЕНИЕ И ЗАГРУЗКА НАСТРОЕК ---
-        private void SaveSettings()
+        private async void ReleaseCheckTimer_Tick(object? sender, object e)
         {
-            var settings = ApplicationData.Current.LocalSettings.Values;
-
-            // Настройки "Открыть окно" удалены
-
-            // Сохраняем "Вверх / Старее"
-            settings["HkNextCtrl"] = HkNextCtrl.IsChecked;
-            settings["HkNextShift"] = HkNextShift.IsChecked;
-            settings["HkNextAlt"] = HkNextAlt.IsChecked;
-            settings["HkNextKey"] = HkNextKey.SelectedIndex;
-
-            // Сохраняем "Вниз / Новее"
-            settings["HkPrevCtrl"] = HkPrevCtrl.IsChecked;
-            settings["HkPrevShift"] = HkPrevShift.IsChecked;
-            settings["HkPrevAlt"] = HkPrevAlt.IsChecked;
-            settings["HkPrevKey"] = HkPrevKey.SelectedIndex;
-
-            // Сохраняем лимит истории
-            settings["HistoryLimit"] = HistoryLimitBox.Text;
-        }
-
-        private void LoadSettings()
-        {
-            var settings = ApplicationData.Current.LocalSettings.Values;
-
-            bool GetBool(string key, bool defaultValue)
+            try
             {
-                return settings.ContainsKey(key) ? (bool)settings[key] : defaultValue;
-            }
-            int GetInt(string key, int defaultValue)
-            {
-                return settings.ContainsKey(key) ? (int)settings[key] : defaultValue;
-            }
+                bool ctrlPressed = (GetAsyncKeyState(0x11) & 0x8000) != 0;
+                bool shiftPressed = (GetAsyncKeyState(0x10) & 0x8000) != 0;
+                bool altPressed = (GetAsyncKeyState(0x12) & 0x8000) != 0;
 
-            // Настройки "Открыть окно" удалены
-
-            HkNextCtrl.IsChecked = GetBool("HkNextCtrl", false);
-            HkNextShift.IsChecked = GetBool("HkNextShift", false);
-            HkNextAlt.IsChecked = GetBool("HkNextAlt", false);
-            HkNextKey.SelectedIndex = GetInt("HkNextKey", 22); // W
-
-            HkPrevCtrl.IsChecked = GetBool("HkPrevCtrl", false);
-            HkPrevShift.IsChecked = GetBool("HkPrevShift", false);
-            HkPrevAlt.IsChecked = GetBool("HkPrevAlt", false);
-            HkPrevKey.SelectedIndex = GetInt("HkPrevKey", 18); // S
-
-            if (settings.ContainsKey("HistoryLimit"))
-            {
-                HistoryLimitBox.Text = settings["HistoryLimit"].ToString();
-            }
-        }
-
-        // --- ЛОГИКА "ОТПУСТИЛ - СКОПИРОВАЛ - ВСТАВИЛ" ---
-        private void ReleaseCheckTimer_Tick(object sender, object e)
-        {
-            bool ctrlPressed = (GetAsyncKeyState(0x11) & 0x8000) != 0;
-            bool shiftPressed = (GetAsyncKeyState(0x10) & 0x8000) != 0;
-            bool altPressed = (GetAsyncKeyState(0x12) & 0x8000) != 0;
-
-            if (!ctrlPressed && !shiftPressed && !altPressed)
-            {
-                _releaseCheckTimer.Stop();
-                if (_previewWindow.Visible && _fullHistory.Count > _currentPreviewIndex)
+                if (!ctrlPressed && !shiftPressed && !altPressed)
                 {
-                    var item = _fullHistory[_currentPreviewIndex];
-                    CopyToClipboard(item);
-                    _previewWindow.Hide();
-                    _ = PasteSelection();
+                    _releaseCheckTimer.Stop();
+                    if (_previewWindow.Visible && _fullHistory.Count > _currentPreviewIndex)
+                    {
+                        var item = _fullHistory[_currentPreviewIndex];
+                        await CopyToClipboard(item);
+                        _previewWindow.Hide();
+                        await PasteSelection();
+                    }
                 }
             }
+            catch { }
         }
 
         private async Task PasteSelection()
         {
             await Task.Delay(150);
-            keybd_event(0x11, 0, 0, 0); // Ctrl Down
-            keybd_event(0x56, 0, 0, 0); // V Down
-            keybd_event(0x56, 0, 0x0002, 0); // V Up
-            keybd_event(0x11, 0, 0x0002, 0); // Ctrl Up
+            INPUT[] inputs = new INPUT[4];
+            inputs[0] = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL, dwFlags = 0 } } };
+            inputs[1] = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_V, dwFlags = 0 } } };
+            inputs[2] = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_V, dwFlags = KEYEVENTF_KEYUP } } };
+            inputs[3] = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } };
+            SendInput((uint)inputs.Length, inputs, INPUT.Size);
         }
 
-        [DllImport("user32.dll")]
-        static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
-        [DllImport("user32.dll")]
-        static extern short GetAsyncKeyState(int vKey);
-
-        // --- ГОРЯЧИЕ КЛАВИШИ ---
         private void SetupHotKeys()
         {
-            // HotKeyHelper.Unregister(_hWnd, ID_OPEN); // Удалено
             HotKeyHelper.Unregister(_hWnd, ID_NEXT);
             HotKeyHelper.Unregister(_hWnd, ID_PREV);
             RegisterHotKeysFromUI();
+
             if (_subclassDelegate == null)
             {
                 _subclassDelegate = new SubclassProc(WndProc);
                 SetWindowSubclass(_hWnd, _subclassDelegate, 0, IntPtr.Zero);
             }
+
             this.Closed += (s, e) => {
-                // HotKeyHelper.Unregister(_hWnd, ID_OPEN); // Удалено
                 HotKeyHelper.Unregister(_hWnd, ID_NEXT);
                 HotKeyHelper.Unregister(_hWnd, ID_PREV);
                 _previewWindow.Close();
@@ -175,7 +121,6 @@ namespace Sona_Clipboard
 
         private void RegisterHotKeysFromUI()
         {
-            // RegisterSingleKey(ID_OPEN, HkOpenCtrl, HkOpenShift, HkOpenAlt, HkOpenKey); // Удалено
             RegisterSingleKey(ID_NEXT, HkNextCtrl, HkNextShift, HkNextAlt, HkNextKey);
             RegisterSingleKey(ID_PREV, HkPrevCtrl, HkPrevShift, HkPrevAlt, HkPrevKey);
         }
@@ -196,7 +141,6 @@ namespace Sona_Clipboard
             if (uMsg == WM_HOTKEY)
             {
                 int id = wParam.ToInt32();
-                // if (id == ID_OPEN) ToggleWindowVisibility(); // Удалено
                 if (id == ID_NEXT) ShowPreview(goDeeper: true);
                 else if (id == ID_PREV) ShowPreview(goDeeper: false);
                 return IntPtr.Zero;
@@ -207,15 +151,17 @@ namespace Sona_Clipboard
         private void ShowPreview(bool goDeeper)
         {
             if (_fullHistory.Count == 0) return;
+
             if (_previewWindow.Visible == false)
             {
-                _currentPreviewIndex = 0;
                 _releaseCheckTimer.Start();
             }
             else
             {
-                if (goDeeper) _currentPreviewIndex++; else _currentPreviewIndex--;
+                if (goDeeper) _currentPreviewIndex++;
+                else _currentPreviewIndex--;
             }
+
             if (_currentPreviewIndex < 0) _currentPreviewIndex = 0;
             if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = _fullHistory.Count - 1;
 
@@ -223,10 +169,125 @@ namespace Sona_Clipboard
             _previewWindow.ShowItem(item, _currentPreviewIndex + 1);
         }
 
-        private void ToggleWindowVisibility()
+        private async void Clipboard_ContentChanged(object? sender, object? e)
         {
-            if (this.Visible) { _appWindow.Hide(); }
-            else { _appWindow.Show(); SetForegroundWindow(_hWnd); }
+            if (_isCopiedByMe) { _isCopiedByMe = false; return; }
+
+            DataPackageView? view = null;
+            for (int i = 0; i < 5; i++) { try { view = Clipboard.GetContent(); break; } catch { await Task.Delay(100); } }
+            if (view == null) return;
+
+            try
+            {
+                if (view.Contains(StandardDataFormats.Text))
+                {
+                    string text = await view.GetTextAsync();
+                    if (_fullHistory.Count > 0 && _fullHistory[0].Content == text) return;
+                    AddToHistory(new ClipboardItem { Type = "Text", Content = text, Timestamp = DateTime.Now.ToString("HH:mm") });
+                }
+                else if (view.Contains(StandardDataFormats.StorageItems))
+                {
+                    var storageItems = await view.GetStorageItemsAsync();
+                    if (storageItems.Count == 0) return;
+
+                    var paths = new List<string>();
+                    foreach (var item in storageItems) if (!string.IsNullOrEmpty(item.Path)) paths.Add(item.Path);
+                    if (paths.Count == 0) return;
+
+                    string content = string.Join(Environment.NewLine, paths);
+                    if (_fullHistory.Count > 0 && _fullHistory[0].Content == content) return;
+
+                    AddToHistory(new ClipboardItem { Type = "File", Content = content, Timestamp = DateTime.Now.ToString("HH:mm") });
+                }
+                else if (view.Contains(StandardDataFormats.Bitmap))
+                {
+                    RandomAccessStreamReference imageStreamRef = await view.GetBitmapAsync();
+                    using (IRandomAccessStreamWithContentType stream = await imageStreamRef.OpenReadAsync())
+                    {
+                        byte[] imageBytes = new byte[stream.Size];
+                        using (DataReader reader = new DataReader(stream)) { await reader.LoadAsync((uint)stream.Size); reader.ReadBytes(imageBytes); }
+
+                        if (_fullHistory.Count > 0 && _fullHistory[0].Type == "Image" && _fullHistory[0].ImageBytes?.Length == imageBytes.Length) return;
+
+                        AddToHistory(new ClipboardItem
+                        {
+                            Type = "Image",
+                            Content = "Картинка " + DateTime.Now.ToString("HH:mm"),
+                            ImageBytes = imageBytes,
+                            Timestamp = DateTime.Now.ToString("HH:mm"),
+                            Thumbnail = await BytesToImage(imageBytes)
+                        });
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void AddToHistory(ClipboardItem item)
+        {
+            this.DispatcherQueue.TryEnqueue(() => {
+                _fullHistory.Insert(0, item);
+                SaveToDb(item);
+                TrimHistory();
+                UpdateListUI(SearchBox.Text);
+                _currentPreviewIndex = 0;
+            });
+        }
+
+        private async Task CopyToClipboard(ClipboardItem item)
+        {
+            if (item == null) return;
+            _isCopiedByMe = true;
+            DataPackage package = new DataPackage();
+            package.RequestedOperation = DataPackageOperation.Copy;
+
+            try
+            {
+                if (item.Type == "Text" && item.Content != null) package.SetText(item.Content);
+                else if (item.Type == "Image" && item.ImageBytes != null)
+                {
+                    InMemoryRandomAccessStream stream = new InMemoryRandomAccessStream();
+                    await stream.WriteAsync(item.ImageBytes.AsBuffer());
+                    stream.Seek(0);
+                    package.SetBitmap(RandomAccessStreamReference.CreateFromStream(stream));
+                }
+                else if (item.Type == "File" && item.Content != null)
+                {
+                    string[] paths = item.Content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    List<IStorageItem> storageItems = new List<IStorageItem>();
+                    foreach (string path in paths)
+                    {
+                        if (System.IO.File.Exists(path) || System.IO.Directory.Exists(path))
+                        {
+                            try { storageItems.Add(await StorageFile.GetFileFromPathAsync(path)); } catch { }
+                        }
+                    }
+                    if (storageItems.Count > 0) package.SetStorageItems(storageItems);
+                }
+
+                Clipboard.SetContent(package);
+                if (item.Type == "Text") await Task.Delay(50); else await Task.Delay(200);
+            }
+            catch { }
+        }
+
+        private void UpdateListUI(string query = "")
+        {
+            ClipboardList.Items.Clear();
+            var itemsToShow = string.IsNullOrWhiteSpace(query) ? _fullHistory : _fullHistory.Where(i => i.Content != null && i.Content.ToLower().Contains(query.ToLower())).ToList();
+            foreach (var item in itemsToShow) ClipboardList.Items.Add(item);
+            EmptyStatusText.Visibility = (ClipboardList.Items.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) { UpdateListUI(SearchBox.Text); }
+
+        private async void ClipboardList_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is ClipboardItem item)
+            {
+                _currentPreviewIndex = _fullHistory.IndexOf(item);
+                await CopyToClipboard(item);
+            }
         }
 
         private void InitializeDatabase()
@@ -246,9 +307,7 @@ namespace Sona_Clipboard
             using (var db = new SqliteConnection($"Filename={_dbPath}"))
             {
                 db.Open();
-                var insertCommand = new SqliteCommand();
-                insertCommand.Connection = db;
-                insertCommand.CommandText = "INSERT INTO History VALUES (NULL, @Type, @Content, @ImageBytes, @Timestamp)";
+                var insertCommand = new SqliteCommand("INSERT INTO History VALUES (NULL, @Type, @Content, @ImageBytes, @Timestamp)", db);
                 insertCommand.Parameters.AddWithValue("@Type", item.Type);
                 insertCommand.Parameters.AddWithValue("@Content", (object?)item.Content ?? DBNull.Value);
                 insertCommand.Parameters.AddWithValue("@ImageBytes", (object?)item.ImageBytes ?? DBNull.Value);
@@ -286,151 +345,49 @@ namespace Sona_Clipboard
             UpdateListUI();
         }
 
-        private async void Clipboard_ContentChanged(object? sender, object? e)
+        private void SaveSettings()
         {
-            if (_isCopiedByMe) { _isCopiedByMe = false; return; }
-            try
-            {
-                DataPackageView view = Clipboard.GetContent();
-                if (view.Contains(StandardDataFormats.Text))
-                {
-                    string text = await view.GetTextAsync();
-                    if (_fullHistory.Count > 0 && _fullHistory[0].Content == text) return;
-                    var newItem = new ClipboardItem { Type = "Text", Content = text, Timestamp = DateTime.Now.ToString() };
-                    AddToHistory(newItem);
-                }
-                else if (view.Contains(StandardDataFormats.Bitmap))
-                {
-                    RandomAccessStreamReference imageStreamRef = await view.GetBitmapAsync();
-                    using (IRandomAccessStreamWithContentType stream = await imageStreamRef.OpenReadAsync())
-                    {
-                        byte[] imageBytes = new byte[stream.Size];
-                        using (DataReader reader = new DataReader(stream))
-                        {
-                            await reader.LoadAsync((uint)stream.Size);
-                            reader.ReadBytes(imageBytes);
-                        }
-                        if (_fullHistory.Count > 0 && _fullHistory[0].Type == "Image" && _fullHistory[0].ImageBytes?.Length == imageBytes.Length) return;
-                        var newItem = new ClipboardItem { Type = "Image", Content = "Картинка " + DateTime.Now.ToString("HH:mm"), ImageBytes = imageBytes, Timestamp = DateTime.Now.ToString(), Thumbnail = await BytesToImage(imageBytes) };
-                        AddToHistory(newItem);
-                    }
-                }
-            }
-            catch { }
+            var settings = ApplicationData.Current.LocalSettings.Values;
+            settings["HkNextCtrl"] = HkNextCtrl.IsChecked;
+            settings["HkNextShift"] = HkNextShift.IsChecked;
+            settings["HkNextAlt"] = HkNextAlt.IsChecked;
+            settings["HkNextKey"] = HkNextKey.SelectedIndex;
+            settings["HkPrevCtrl"] = HkPrevCtrl.IsChecked;
+            settings["HkPrevShift"] = HkPrevShift.IsChecked;
+            settings["HkPrevAlt"] = HkPrevAlt.IsChecked;
+            settings["HkPrevKey"] = HkPrevKey.SelectedIndex;
+            settings["HistoryLimit"] = HistoryLimitBox.Text;
         }
 
-        private void AddToHistory(ClipboardItem item)
+        private void LoadSettings()
         {
-            this.DispatcherQueue.TryEnqueue(() => {
-                _fullHistory.Insert(0, item);
-                SaveToDb(item);
-                TrimHistory();
-                UpdateListUI(SearchBox.Text);
-            });
-        }
+            var settings = ApplicationData.Current.LocalSettings.Values;
+            bool GetBool(string key, bool defaultValue) => settings.ContainsKey(key) ? (bool)settings[key] : defaultValue;
+            int GetInt(string key, int defaultValue) => settings.ContainsKey(key) ? (int)settings[key] : defaultValue;
 
-        private void UpdateListUI(string query = "")
-        {
-            ClipboardList.Items.Clear();
-            var itemsToShow = string.IsNullOrWhiteSpace(query) ? _fullHistory : _fullHistory.Where(i => i.Content != null && i.Content.ToLower().Contains(query.ToLower())).ToList();
-            foreach (var item in itemsToShow) ClipboardList.Items.Add(item);
-            EmptyStatusText.Visibility = (ClipboardList.Items.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) { UpdateListUI(SearchBox.Text); }
-
-        private void ClipboardList_ItemClick(object sender, ItemClickEventArgs e)
-        {
-            var item = e.ClickedItem as ClipboardItem;
-            CopyToClipboard(item);
-        }
-
-        private async void CopyToClipboard(ClipboardItem item)
-        {
-            if (item == null) return;
-            _isCopiedByMe = true;
-            DataPackage package = new DataPackage();
-            if (item.Type == "Text" && item.Content != null) package.SetText(item.Content);
-            else if (item.Type == "Image" && item.ImageBytes != null)
-            {
-                InMemoryRandomAccessStream stream = new InMemoryRandomAccessStream();
-                await stream.WriteAsync(item.ImageBytes.AsBuffer());
-                stream.Seek(0);
-                package.SetBitmap(RandomAccessStreamReference.CreateFromStream(stream));
-            }
-            Clipboard.SetContent(package);
+            HkNextCtrl.IsChecked = GetBool("HkNextCtrl", false);
+            HkNextShift.IsChecked = GetBool("HkNextShift", false);
+            HkNextAlt.IsChecked = GetBool("HkNextAlt", false);
+            HkNextKey.SelectedIndex = GetInt("HkNextKey", 22);
+            HkPrevCtrl.IsChecked = GetBool("HkPrevCtrl", false);
+            HkPrevShift.IsChecked = GetBool("HkPrevShift", false);
+            HkPrevAlt.IsChecked = GetBool("HkPrevAlt", false);
+            HkPrevKey.SelectedIndex = GetInt("HkPrevKey", 18);
+            if (settings.ContainsKey("HistoryLimit")) HistoryLimitBox.Text = settings["HistoryLimit"].ToString();
         }
 
         private void SettingsButton_Click(object sender, RoutedEventArgs e) { HistoryView.Visibility = Visibility.Collapsed; SettingsView.Visibility = Visibility.Visible; DbPathText.Text = _dbPath; }
         private void BackButton_Click(object sender, RoutedEventArgs e) { SettingsView.Visibility = Visibility.Collapsed; HistoryView.Visibility = Visibility.Visible; }
         private void OpenFolder_Click(object sender, RoutedEventArgs e) { try { System.Diagnostics.Process.Start("explorer.exe", AppDomain.CurrentDomain.BaseDirectory); } catch { } }
+        private void ApplyHotKeys_Click(object sender, RoutedEventArgs e) { HotKeyHelper.Unregister(_hWnd, ID_NEXT); HotKeyHelper.Unregister(_hWnd, ID_PREV); RegisterHotKeysFromUI(); SaveSettings(); MaintenanceStatus.Text = "Настройки сохранены!"; }
+        private void ApplyLimit_Click(object sender, RoutedEventArgs e) { TrimHistory(); SaveSettings(); MaintenanceStatus.Text = "Лимит применен"; }
+        private void TrimHistory() { if (!int.TryParse(HistoryLimitBox.Text, out int limit)) limit = 100; if (_fullHistory.Count > limit) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand($"DELETE FROM History WHERE Id NOT IN (SELECT Id FROM History ORDER BY Id DESC LIMIT {limit})", db).ExecuteNonQuery(); } LoadHistoryFromDb(); } }
+        private void RemoveDuplicates_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History WHERE Id NOT IN (SELECT MAX(Id) FROM History GROUP BY Content, Type)", db).ExecuteNonQuery(); } LoadHistoryFromDb(); MaintenanceStatus.Text = "Дубликаты удалены"; }
+        private void RemoveImages_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History WHERE Type = 'Image'", db).ExecuteNonQuery(); } LoadHistoryFromDb(); MaintenanceStatus.Text = "Картинки удалены"; }
+        private void RemoveHeavy_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History WHERE length(ImageBytes) > 2097152", db).ExecuteNonQuery(); } LoadHistoryFromDb(); MaintenanceStatus.Text = "Тяжелые файлы удалены"; }
+        private void ClearHistory_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History", db).ExecuteNonQuery(); } _fullHistory.Clear(); UpdateListUI(); MaintenanceStatus.Text = "История очищена"; }
 
-        // --- СОХРАНЯЕМ ПРИ НАЖАТИИ КНОПКИ ---
-        private void ApplyHotKeys_Click(object sender, RoutedEventArgs e)
-        {
-            // HotKeyHelper.Unregister(_hWnd, ID_OPEN); // Удалено
-            HotKeyHelper.Unregister(_hWnd, ID_NEXT); HotKeyHelper.Unregister(_hWnd, ID_PREV);
-            RegisterHotKeysFromUI();
-            SaveSettings(); // <--- Сохраняем настройки
-            MaintenanceStatus.Text = "Настройки сохранены и применены!";
-        }
-
-        private void ApplyLimit_Click(object sender, RoutedEventArgs e)
-        {
-            TrimHistory();
-            SaveSettings(); // <--- Сохраняем настройки при смене лимита
-            MaintenanceStatus.Text = $"Лимит применен";
-        }
-
-        private void TrimHistory()
-        {
-            if (!int.TryParse(HistoryLimitBox.Text, out int limit)) limit = 100;
-            if (_fullHistory.Count > limit)
-            {
-                using (var db = new SqliteConnection($"Filename={_dbPath}"))
-                {
-                    db.Open();
-                    var sql = $"DELETE FROM History WHERE Id NOT IN (SELECT Id FROM History ORDER BY Id DESC LIMIT {limit})";
-                    new SqliteCommand(sql, db).ExecuteNonQuery();
-                }
-                LoadHistoryFromDb();
-            }
-        }
-        private void RemoveDuplicates_Click(object sender, RoutedEventArgs e)
-        {
-            using (var db = new SqliteConnection($"Filename={_dbPath}"))
-            {
-                db.Open();
-                var sql = "DELETE FROM History WHERE Id NOT IN (SELECT MAX(Id) FROM History GROUP BY Content, Type)";
-                new SqliteCommand(sql, db).ExecuteNonQuery();
-            }
-            LoadHistoryFromDb(); MaintenanceStatus.Text = "Дубликаты удалены";
-        }
-        private void RemoveImages_Click(object sender, RoutedEventArgs e)
-        {
-            using (var db = new SqliteConnection($"Filename={_dbPath}"))
-            {
-                db.Open(); new SqliteCommand("DELETE FROM History WHERE Type = 'Image'", db).ExecuteNonQuery();
-            }
-            LoadHistoryFromDb(); MaintenanceStatus.Text = "Картинки удалены";
-        }
-        private void RemoveHeavy_Click(object sender, RoutedEventArgs e)
-        {
-            using (var db = new SqliteConnection($"Filename={_dbPath}"))
-            {
-                db.Open(); new SqliteCommand("DELETE FROM History WHERE length(ImageBytes) > 2097152", db).ExecuteNonQuery();
-            }
-            LoadHistoryFromDb(); MaintenanceStatus.Text = "Тяжелые файлы удалены";
-        }
-        private void ClearHistory_Click(object sender, RoutedEventArgs e)
-        {
-            using (var db = new SqliteConnection($"Filename={_dbPath}"))
-            {
-                db.Open(); new SqliteCommand("DELETE FROM History", db).ExecuteNonQuery();
-            }
-            _fullHistory.Clear(); UpdateListUI(); MaintenanceStatus.Text = "История очищена";
-        }
-        private async Task<BitmapImage> BytesToImage(byte[] bytes)
+        private async Task<BitmapImage?> BytesToImage(byte[]? bytes)
         {
             if (bytes == null) return null;
             using (InMemoryRandomAccessStream stream = new InMemoryRandomAccessStream())
@@ -439,14 +396,18 @@ namespace Sona_Clipboard
                 BitmapImage image = new BitmapImage(); await image.SetSourceAsync(stream); return image;
             }
         }
+
         private void CenterWindow()
         {
             IntPtr hWnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
             WindowId windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hWnd);
-            AppWindow appWindow = AppWindow.GetFromWindowId(windowId);
+
+            // --- ИСПРАВЛЕНИЕ ЗДЕСЬ (AppWindow может быть null) ---
+            AppWindow? appWindow = AppWindow.GetFromWindowId(windowId);
+
             if (appWindow != null)
             {
-                DisplayArea displayArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary);
+                DisplayArea? displayArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary);
                 if (displayArea != null)
                 {
                     var centeredPosition = appWindow.Position;
@@ -457,25 +418,29 @@ namespace Sona_Clipboard
             }
         }
 
-        [DllImport("comctl32.dll", SetLastError = true)]
-        private static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass, uint uIdSubclass, IntPtr dwRefData);
-        [DllImport("comctl32.dll", SetLastError = true)]
-        private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
-        [DllImport("user32.dll")]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("comctl32.dll", SetLastError = true)] private static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc? pfnSubclass, uint uIdSubclass, IntPtr dwRefData);
+        [DllImport("comctl32.dll", SetLastError = true)] private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
         private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam, uint uIdSubclass, IntPtr dwRefData);
+
+        [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+        [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public InputUnion U; public static int Size => Marshal.SizeOf(typeof(INPUT)); }
+        [StructLayout(LayoutKind.Explicit)] struct InputUnion { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; [FieldOffset(0)] public HARDWAREINPUT hi; }
+        [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+        [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+        [StructLayout(LayoutKind.Sequential)] struct HARDWAREINPUT { public uint uMsg; public ushort wParamL; public ushort wParamH; }
+        const int INPUT_KEYBOARD = 1; const uint KEYEVENTF_KEYUP = 0x0002; const ushort VK_CONTROL = 0x11; const ushort VK_V = 0x56;
     }
+
     public class TypeToIconConverter : Microsoft.UI.Xaml.Data.IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, string language)
         {
-            string type = value as string;
+            string? type = value as string;
             if (type == "Image") return "\uEB9F";
+            if (type == "File") return "\uE8B7";
             return "\uE8C4";
         }
-        public object ConvertBack(object value, Type targetType, object parameter, string language)
-        {
-            throw new NotImplementedException();
-        }
+        public object ConvertBack(object value, Type targetType, object parameter, string language) { throw new NotImplementedException(); }
     }
 }

@@ -1,4 +1,6 @@
 ﻿using Microsoft.UI.Xaml.Media.Imaging;
+using System;
+using System.Linq;
 
 namespace Sona_Clipboard
 {
@@ -10,5 +12,23 @@ namespace Sona_Clipboard
         public byte[]? ImageBytes { get; set; }
         public string Timestamp { get; set; } = "";
         public BitmapImage? Thumbnail { get; set; }
+
+        // --- НОВОЕ: Умное свойство для отображения в списке ---
+        public string DisplayText
+        {
+            get
+            {
+                if (Type == "File" && !string.IsNullOrEmpty(Content))
+                {
+                    // Считаем количество строк (путей к файлам)
+                    int count = Content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+                    if (count > 1)
+                        return $"📂 Скопировано файлов: {count}";
+                    else
+                        return Content; // Если файл один, показываем путь
+                }
+                return Content ?? "";
+            }
+        }
     }
 }
