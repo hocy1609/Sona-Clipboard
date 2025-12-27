@@ -44,10 +44,7 @@ namespace Sona_Clipboard
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
         {
             _window = new MainWindow();
-
-            // ВАЖНО: Мы убрали Activate(), чтобы окно не появлялось само.
-            // Теперь MainWindow сам решит, показаться (первый запуск) или сидеть в трее.
-            // _window.Activate(); 
+            _window.Activate();
         }
     }
 }
