@@ -56,7 +56,12 @@ namespace Sona_Clipboard
             // --- 2. Установка иконки ---
             try
             {
-                var iconPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "Assets", "favicon.ico");
+                // ИСПРАВЛЕНО: Убрали "Assets", так как файл лежит рядом с exe
+                var iconPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "favicon.ico");
+
+                // На всякий случай проверим в отладке, тот ли это путь
+                System.Diagnostics.Debug.WriteLine("Ищу иконку тут: " + iconPath);
+
                 _appWindow.SetIcon(iconPath);
             }
             catch (Exception ex)
