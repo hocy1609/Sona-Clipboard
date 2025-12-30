@@ -1,10 +1,10 @@
-using H.NotifyIcon; // Библиотека трея
+using H.NotifyIcon; //  
 using Microsoft.Data.Sqlite;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input; // Нужно для StandardUICommand
+using Microsoft.UI.Xaml.Input; //   StandardUICommand
 using Microsoft.UI.Xaml.Media.Imaging;
 using System;
 using System.Collections.Generic;
@@ -17,17 +17,20 @@ using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.Storage.Streams;
 using WinRT.Interop;
-using System.Windows.Input; // Исправляет ошибку ICommand
-using System.Runtime.InteropServices.WindowsRuntime; // Исправляет ошибку AsBuffer
+using System.Windows.Input; //   ICommand
+using System.Runtime.InteropServices.WindowsRuntime; //   AsBuffer
+
+using Sona_Clipboard.Services; // For RelayCommand
 
 namespace Sona_Clipboard
 {
     public sealed partial class MainWindow : Window
     {
-        // --- Поля для трея и первого запуска ---
-        public StandardUICommand ShowWindowCommand { get; }
-        private bool _isFirstRunInternal = true; // Хранит состояние в памяти
-        // ---------------------------------------
+        // ---       --- 
+        public ICommand ShowWindowCommand { get; }
+        public ICommand ExitAppCommand { get; }
+        private bool _isFirstRunInternal = true; //    
+        // --------------------------------------- 
 
         private bool _isCopiedByMe = false;
         private string _dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SonaClipboard.db");
@@ -39,7 +42,7 @@ namespace Sona_Clipboard
         private SubclassProc? _subclassDelegate;
         private PreviewWindow _previewWindow;
 
-        // Индекс текущего элемента
+        //   
         private int _currentPreviewIndex = 0;
 
         private DispatcherTimer _releaseCheckTimer;
@@ -49,21 +52,40 @@ namespace Sona_Clipboard
 
         public MainWindow()
         {
+            // 1. Initialize commands using RelayCommand (logic-only, works when hidden)
+            ShowWindowCommand = new RelayCommand((param) => ShowWindow());
+            ExitAppCommand = new RelayCommand((param) => ExitApp_Internal());
+
             this.InitializeComponent();
 
-            // 1. Инициализация команды для клика по иконке в трее
-            ShowWindowCommand = new StandardUICommand(StandardUICommandKind.None);
-            ShowWindowCommand.ExecuteRequested += (s, e) => ShowWindow();
+            // Ensure bindings/commands work for the tray icon
+            if (this.Content is FrameworkElement root)
+            {
+                root.DataContext = this;
+            }
+            // DataContext set so XAML x:Bind works for tray icon commands
+
+            // FIX: Explicitly set DataContext for the ContextFlyout items to ensure they work
+            if (TrayIcon.ContextFlyout is MenuFlyout flyout)
+            {
+                foreach (var item in flyout.Items)
+                {
+                    if (item is FrameworkElement fe)
+                    {
+                        fe.DataContext = this;
+                    }
+                }
+            }
 
             _hWnd = WindowNative.GetWindowHandle(this);
             WindowId windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
             _appWindow = AppWindow.GetFromWindowId(windowId);
 
-            // --- Установка названия окна ---
+            // ---    --- 
             this.Title = "Sona Clipboard";
             if (_appWindow != null) _appWindow.Title = "Sona Clipboard";
 
-            // --- Установка иконки окна ---
+            // ---    --- 
             try
             {
                 var iconPath = System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory, "favicon.ico");
@@ -71,7 +93,7 @@ namespace Sona_Clipboard
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("Не удалось загрузить иконку: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine("   : " + ex.Message);
             }
 
             ExtendsContentIntoTitleBar = true;
@@ -92,40 +114,37 @@ namespace Sona_Clipboard
             LoadSettings();
             SetupHotKeys();
 
-            // --- ВАЖНО: Перехват закрытия окна (сворачивание в трей) ---
+            // --- :    (  ) --- 
             this.Closed += MainWindow_Closed;
 
-            // --- Проверка первого запуска ---
+            // ---    --- 
             if (this.Content is FrameworkElement content)
             {
                 content.Loaded += (s, e) => CheckFirstRun();
             }
 
-            SetupHotKeys();
-            this.Closed += MainWindow_Closed;
-
-            // Просто вызываем проверку. Она сама решит, показывать окно или нет.
+            //   .   ,    .
             CheckFirstRun();
         }
 
-        // ==========================================
-        // ЛОГИКА ТРЕЯ И ЗАПУСКА
-        // ==========================================
+        // ========================================== 
+        //    
+        // ========================================== 
 
         private async void CheckFirstRun()
         {
-            // Загружаем настройки, чтобы проверить флаг
+            //  ,   
             LoadSettings();
 
             if (_isFirstRunInternal)
             {
-                // 1. Принудительно показываем окно, так как диалогу нужен "родитель"
+                // 1.   ,     ""
                 this.Activate();
 
-                // 2. Ждем, пока у окна появится XamlRoot (оно прогрузится)
+                // 2. ,     XamlRoot ( )
                 if (this.Content is FrameworkElement content)
                 {
-                    // Если XamlRoot еще нет, ждем события Loaded
+                    //  XamlRoot  ,   Loaded
                     if (content.XamlRoot == null)
                     {
                         var tcs = new TaskCompletionSource<bool>();
@@ -136,96 +155,68 @@ namespace Sona_Clipboard
                     }
                 }
 
-                // 3. Создаем и показываем диалог
+                // 3.    
                 ContentDialog dialog = new ContentDialog
                 {
-                    Title = "Sona Clipboard запущена!",
-                    Content = "Программа теперь живет в системном трее (возле часов).\n\nНажмите на иконку или используйте горячие клавиши (Alt+A и т.д.), чтобы открыть историю.",
-                    CloseButtonText = "Понятно",
+                    Title = "Sona Clipboard !",
+                    Content = "      ( ).\n\n       (Alt+A  ..),   .",
+                    CloseButtonText = "",
                     XamlRoot = this.Content.XamlRoot
                 };
 
                 await dialog.ShowAsync();
 
-                // 4. Как только нажали "Понятно" — прячем окно и сохраняем настройки
+                // 4.    ""      
                 _isFirstRunInternal = false;
                 SaveSettings();
                 this.Hide();
             }
             else
             {
-                // ЭТО ОБЫЧНЫЙ ЗАПУСК
-                // Мы НЕ вызывали this.Activate(), поэтому окно создалось, 
-                // иконка в трее появилась, но само черное окно на экране не вылезет.
+                //   
+                //    this.Activate(),   , 
+                //    ,        .
             }
-        }
-
-        private void ShowWindow()
-        {
-            // 1. Принудительно показываем окно через Win32 API
-            Win32ShowWindow(_hWnd, SW_SHOW);
-
-            // 2. Если окно свернуто — восстанавливаем
-            Win32ShowWindow(_hWnd, SW_RESTORE);
-
-            // 3. Пытаемся получить AppWindow заново (на случай, если ссылка протухла)
-            WindowId windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
-            AppWindow? appWindow = AppWindow.GetFromWindowId(windowId);
-
-            if (appWindow != null)
-            {
-                appWindow.Show(); // Самый важный метод WinUI 3
-
-                if (appWindow.Presenter is OverlappedPresenter presenter)
-                {
-                    // Форсируем восстановление из любого состояния
-                    if (presenter.State == OverlappedPresenterState.Minimized)
-                    {
-                        presenter.Restore();
-                    }
-                }
-            }
-
-            // 4. "Магическая" функция, которая переключает фокус на окно (лучше, чем SetForegroundWindow)
-            SwitchToThisWindow(_hWnd, true);
-
-            // 5. Финальный аккорд
-            this.Activate();
         }
 
         private void MainWindow_Closed(object sender, WindowEventArgs args)
         {
-            // ОТМЕНЯЕМ закрытие
+            //  
             args.Handled = true;
-            // Просто прячем окно
+            //   
             this.Hide();
         }
 
-        // Метод для контекстного меню "Открыть"
+        //     ""
         private void Open_Click(object sender, RoutedEventArgs e)
         {
             ShowWindow();
         }
 
-        // Метод для контекстного меню "Выход"
+        //     ""
         private void Exit_Click(object sender, RoutedEventArgs e)
         {
-            // Отписываемся от события, чтобы окно реально закрылось
+            ExitApp_Internal();
+        }
+
+        private void ExitApp_Internal()
+        {
+            //   ,    
             this.Closed -= MainWindow_Closed;
 
-            // Закрываем превью, если есть
+            //  ,  
             _previewWindow?.Close();
 
-            // Закрываем главное окно
+            //   
             this.Close();
 
-            // Убиваем процесс полностью
+            //   
             Environment.Exit(0);
         }
 
-        // ==========================================
-        // ОСТАЛЬНОЙ КОД
-        // ==========================================
+        // ========================================== 
+        //  
+        // ========================================== 
 
         private async void ReleaseCheckTimer_Tick(object? sender, object e)
         {
@@ -273,7 +264,7 @@ namespace Sona_Clipboard
                 SetWindowSubclass(_hWnd, _subclassDelegate, 0, IntPtr.Zero);
             }
 
-            // Убрал закрытие здесь, так как оно теперь обрабатывается в Exit_Click
+            //   ,       Exit_Click
         }
 
         private void RegisterHotKeysFromUI()
@@ -369,7 +360,7 @@ namespace Sona_Clipboard
                         AddToHistory(new ClipboardItem
                         {
                             Type = "Image",
-                            Content = "Картинка " + DateTime.Now.ToString("HH:mm"),
+                            Content = " " + DateTime.Now.ToString("HH:mm"),
                             ImageBytes = imageBytes,
                             Timestamp = DateTime.Now.ToString("HH:mm"),
                             Thumbnail = await BytesToImage(imageBytes)
@@ -382,7 +373,8 @@ namespace Sona_Clipboard
 
         private void AddToHistory(ClipboardItem item)
         {
-            this.DispatcherQueue.TryEnqueue(() => {
+            this.DispatcherQueue.TryEnqueue(() =>
+            {
                 _fullHistory.Insert(0, item);
                 SaveToDb(item);
                 TrimHistory();
@@ -494,7 +486,7 @@ namespace Sona_Clipboard
                     {
                         item.ImageBytes = (byte[])query["ImageBytes"];
                         item.Thumbnail = await BytesToImage(item.ImageBytes);
-                        if (item.Content == null) item.Content = "Изображение";
+                        if (item.Content == null) item.Content = "";
                     }
                     _fullHistory.Add(item);
                 }
@@ -502,9 +494,9 @@ namespace Sona_Clipboard
             UpdateListUI();
         }
 
-        // ==========================================
-        // НАСТРОЙКИ
-        // ==========================================
+        // ========================================== 
+        // 
+        // ========================================== 
 
         public class AppSettingsData
         {
@@ -520,8 +512,11 @@ namespace Sona_Clipboard
 
             public string HistoryLimit { get; set; } = "20";
 
-            // Новое поле для первого запуска
+            //     
             public bool IsFirstRun { get; set; } = true;
+
+            // Auto-start
+            public bool IsAutoStart { get; set; } = false;
         }
 
         private string SettingsPath => Path.Combine(
@@ -552,13 +547,15 @@ namespace Sona_Clipboard
 
                     HistoryLimitBox.Text = data.HistoryLimit;
 
-                    // Загружаем состояние "Первого запуска" в переменную
+                    AutoStartToggle.IsOn = data.IsAutoStart;
+
+                    //   " "  
                     _isFirstRunInternal = data.IsFirstRun;
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("Ошибка чтения настроек: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine("  : " + ex.Message);
             }
         }
 
@@ -580,7 +577,9 @@ namespace Sona_Clipboard
 
                     HistoryLimit = HistoryLimitBox.Text,
 
-                    // СОХРАНЯЕМ ТЕКУЩЕЕ СОСТОЯНИЕ (чтобы не сбросить в true)
+                    IsAutoStart = AutoStartToggle.IsOn,
+
+                    //    (    true)
                     IsFirstRun = _isFirstRunInternal
                 };
 
@@ -595,20 +594,102 @@ namespace Sona_Clipboard
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine("Ошибка сохранения: " + ex.Message);
+                System.Diagnostics.Debug.WriteLine(" : " + ex.Message);
             }
         }
 
         private void SettingsButton_Click(object sender, RoutedEventArgs e) { HistoryView.Visibility = Visibility.Collapsed; SettingsView.Visibility = Visibility.Visible; DbPathText.Text = _dbPath; }
         private void BackButton_Click(object sender, RoutedEventArgs e) { SettingsView.Visibility = Visibility.Collapsed; HistoryView.Visibility = Visibility.Visible; }
         private void OpenFolder_Click(object sender, RoutedEventArgs e) { try { System.Diagnostics.Process.Start("explorer.exe", AppDomain.CurrentDomain.BaseDirectory); } catch { } }
-        private void ApplyHotKeys_Click(object sender, RoutedEventArgs e) { HotKeyHelper.Unregister(_hWnd, ID_NEXT); HotKeyHelper.Unregister(_hWnd, ID_PREV); RegisterHotKeysFromUI(); SaveSettings(); MaintenanceStatus.Text = "Настройки сохранены!"; }
-        private void ApplyLimit_Click(object sender, RoutedEventArgs e) { TrimHistory(); SaveSettings(); MaintenanceStatus.Text = "Лимит применен"; }
+        private void ApplyHotKeys_Click(object sender, RoutedEventArgs e) { HotKeyHelper.Unregister(_hWnd, ID_NEXT); HotKeyHelper.Unregister(_hWnd, ID_PREV); RegisterHotKeysFromUI(); SaveSettings(); MaintenanceStatus.Text = "Р“РѕС‚РѕРІРѕ!"; }
+        private void ApplyLimit_Click(object sender, RoutedEventArgs e) { TrimHistory(); SaveSettings(); MaintenanceStatus.Text = "Р›РёРјРёС‚ РїСЂРёРјРµРЅРµРЅ"; }
         private void TrimHistory() { if (!int.TryParse(HistoryLimitBox.Text, out int limit)) limit = 100; if (_fullHistory.Count > limit) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand($"DELETE FROM History WHERE Id NOT IN (SELECT Id FROM History ORDER BY Id DESC LIMIT {limit})", db).ExecuteNonQuery(); } LoadHistoryFromDb(); } }
-        private void RemoveDuplicates_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History WHERE Id NOT IN (SELECT MAX(Id) FROM History GROUP BY Content, Type)", db).ExecuteNonQuery(); } LoadHistoryFromDb(); MaintenanceStatus.Text = "Дубликаты удалены"; }
-        private void RemoveImages_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History WHERE Type = 'Image'", db).ExecuteNonQuery(); } LoadHistoryFromDb(); MaintenanceStatus.Text = "Картинки удалены"; }
-        private void RemoveHeavy_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History WHERE length(ImageBytes) > 2097152", db).ExecuteNonQuery(); } LoadHistoryFromDb(); MaintenanceStatus.Text = "Тяжелые файлы удалены"; }
-        private void ClearHistory_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History", db).ExecuteNonQuery(); } _fullHistory.Clear(); UpdateListUI(); MaintenanceStatus.Text = "История очищена"; }
+        private void RemoveDuplicates_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History WHERE Id NOT IN (SELECT MAX(Id) FROM History GROUP BY Content, Type)", db).ExecuteNonQuery(); } LoadHistoryFromDb(); MaintenanceStatus.Text = "Р”СѓР±Р»РёРєР°С‚С‹ СѓРґР°Р»РµРЅС‹"; }
+        private void RemoveImages_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History WHERE Type = 'Image'", db).ExecuteNonQuery(); } LoadHistoryFromDb(); MaintenanceStatus.Text = "РљР°СЂС‚РёРЅРєРё СѓРґР°Р»РµРЅС‹"; }
+        private void RemoveHeavy_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History WHERE length(ImageBytes) > 2097152", db).ExecuteNonQuery(); } LoadHistoryFromDb(); MaintenanceStatus.Text = "РўСЏР¶РµР»С‹Рµ С„Р°Р№Р»С‹ СѓРґР°Р»РµРЅС‹"; }
+        private void ClearHistory_Click(object sender, RoutedEventArgs e) { using (var db = new SqliteConnection($"Filename={_dbPath}")) { db.Open(); new SqliteCommand("DELETE FROM History", db).ExecuteNonQuery(); } _fullHistory.Clear(); UpdateListUI(); MaintenanceStatus.Text = "РСЃС‚РѕСЂРёСЏ РѕС‡РёС‰РµРЅР°"; }
+
+        private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (sender is ToggleSwitch toggle)
+            {
+                SetAutoStart(toggle.IsOn);
+                SaveSettings();
+            }
+        }
+
+        private void SetAutoStart(bool enable)
+        {
+            try
+            {
+                string taskName = "SonaClipboard";
+                string exePath = Environment.ProcessPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SonaClipboard.exe");
+
+                // Wrap path in quotes to handle spaces
+                string command = $"'{exePath}'";
+
+                if (enable)
+                {
+                    // Create task with highest privileges
+                    var process = new System.Diagnostics.Process();
+                    process.StartInfo.FileName = "schtasks";
+                    process.StartInfo.Arguments = $"/Create /SC ONLOGON /TN \"{taskName}\" /TR \"{command}\" /RL HIGHEST /F";
+                    process.StartInfo.UseShellExecute = true;
+                    process.StartInfo.Verb = "runas"; // Ensure we have rights to create task
+                    process.StartInfo.CreateNoWindow = true;
+                    process.Start();
+                }
+                else
+                {
+                    // Delete task
+                    var process = new System.Diagnostics.Process();
+                    process.StartInfo.FileName = "schtasks";
+                    process.StartInfo.Arguments = $"/Delete /TN \"{taskName}\" /F";
+                    process.StartInfo.UseShellExecute = true;
+                    process.StartInfo.Verb = "runas";
+                    process.StartInfo.CreateNoWindow = true;
+                    process.Start();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("AutoStart Error: " + ex.Message);
+            }
+        }
+
+        private void ShowWindow()
+        {
+            // Force restore if minimized
+            Win32ShowWindow(_hWnd, SW_RESTORE);
+
+            // Bring to front using AppWindow
+            if (_appWindow != null)
+            {
+                _appWindow.Show();
+                if (_appWindow.Presenter is OverlappedPresenter presenter)
+                {
+                    if (presenter.State == OverlappedPresenterState.Minimized)
+                    {
+                        presenter.Restore();
+                    }
+                    // Force attention
+                    presenter.SetBorderAndTitleBar(true, true);
+                }
+            }
+
+            // Win32 fallback
+            SwitchToThisWindow(_hWnd, true);
+
+            // WinUI Activation
+            this.Activate();
+
+            // Ensure focus
+            this.DispatcherQueue.TryEnqueue(() =>
+            {
+                // Focus search box for convenience
+                SearchBox.Focus(FocusState.Programmatic);
+            });
+        }
 
         private async Task<BitmapImage?> BytesToImage(byte[]? bytes)
         {
@@ -616,7 +697,8 @@ namespace Sona_Clipboard
             using (InMemoryRandomAccessStream stream = new InMemoryRandomAccessStream())
             {
                 await stream.WriteAsync(bytes.AsBuffer()); stream.Seek(0);
-                BitmapImage image = new BitmapImage(); await image.SetSourceAsync(stream); return image;
+                BitmapImage image = new BitmapImage(); await image.SetSourceAsync(stream);
+                return image;
             }
         }
 
@@ -647,12 +729,12 @@ namespace Sona_Clipboard
         [DllImport("user32.dll")]
         static extern short GetAsyncKeyState(int vKey);
 
-        // ПЕРЕИМЕНОВАЛИ В Win32ShowWindow, ЧТОБЫ ИЗБЕЖАТЬ КОНФЛИКТА
+        //   Win32ShowWindow,   
         [DllImport("user32.dll", EntryPoint = "ShowWindow")]
         private static extern bool Win32ShowWindow(IntPtr hWnd, int nCmdShow);
 
         [DllImport("user32.dll")]
-        private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab); // <--- ДОБАВИТЬ ЭТО
+        private static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab); // <---  
 
         private const int SW_SHOW = 5;
         private const int SW_RESTORE = 9;

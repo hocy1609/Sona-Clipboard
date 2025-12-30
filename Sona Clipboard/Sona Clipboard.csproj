@@ -22,7 +22,7 @@
     
     <AssemblyTitle>SonaClipboard</AssemblyTitle>
     
-    <BaseOutputPath>D:\PROG\Portable Mode\Sona Clipboard</BaseOutputPath>
+    <BaseOutputPath>Test\</BaseOutputPath>
     
     <PackageIcon>1609 Logo Dark .jpeg</PackageIcon> 
   </PropertyGroup>
