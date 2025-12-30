@@ -1,10 +1,12 @@
 <Window
-    x:Class="Sona_Clipboard.MainWindow"
+    x:Class="Sona_Clipboard.Views.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:local="using:Sona_Clipboard"
+    xmlns:local="using:Sona_Clipboard.Views"
+    xmlns:models="using:Sona_Clipboard.Models"
+    xmlns:converters="using:Sona_Clipboard.Converters"
     xmlns:tb="using:H.NotifyIcon"
     mc:Ignorable="d">
 
@@ -14,7 +16,7 @@
 
     <Grid>
         <Grid.Resources>
-            <local:TypeToIconConverter x:Key="TypeToIconConverter"/>
+            <converters:TypeToIconConverter x:Key="TypeToIconConverter"/>
         </Grid.Resources>
 
         <Grid.RowDefinitions>

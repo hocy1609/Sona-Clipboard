@@ -2,7 +2,7 @@
 using System;
 using System.Linq;
 
-namespace Sona_Clipboard
+namespace Sona_Clipboard.Models
 {
     public class ClipboardItem
     {

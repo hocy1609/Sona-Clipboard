@@ -8,13 +8,15 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Storage.Streams;
 using WinRT.Interop;
 
-namespace Sona_Clipboard
+using Sona_Clipboard.Models;
+
+namespace Sona_Clipboard.Views
 {
     public sealed partial class PreviewWindow : Window
     {
         private AppWindow _appWindow;
 
-        // Размеры окна
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
         private const int WIN_WIDTH = 300;
         private const int WIN_HEIGHT = 220;
 
@@ -27,7 +29,7 @@ namespace Sona_Clipboard
             _appWindow = AppWindow.GetFromWindowId(windowId);
 
             var presenter = OverlappedPresenter.Create();
-            // Настраиваем окно без рамок
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
             presenter.SetBorderAndTitleBar(false, false);
             presenter.IsResizable = false;
             presenter.IsAlwaysOnTop = true;
@@ -36,7 +38,7 @@ namespace Sona_Clipboard
             _appWindow.Resize(new Windows.Graphics.SizeInt32(WIN_WIDTH, WIN_HEIGHT));
         }
 
-        // Этот метод нужен, чтобы главное окно могло скрывать превью
+        // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
         public void Hide()
         {
             _appWindow.Hide();
@@ -44,7 +46,7 @@ namespace Sona_Clipboard
 
         public async void ShowItem(ClipboardItem item, int index)
         {
-            IndexText.Text = $"Клип #{index} ({item.Timestamp})";
+            IndexText.Text = $"пїЅпїЅпїЅпїЅ #{index} ({item.Timestamp})";
 
             if (item.Type == "Image" && item.ImageBytes != null)
             {
@@ -71,7 +73,7 @@ namespace Sona_Clipboard
             this.Activate();
         }
 
-        // Умное позиционирование (над/под и слева/справа от курсора)
+        // пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅ/пїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ/пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ)
         private void SmartMoveToCursor()
         {
             GetCursorPos(out POINT lpPoint);
@@ -80,33 +82,33 @@ namespace Sona_Clipboard
             WindowId windowId = Win32Interop.GetWindowIdFromWindow(hWnd);
             DisplayArea displayArea = DisplayArea.GetFromPoint(new Windows.Graphics.PointInt32(lpPoint.X, lpPoint.Y), DisplayAreaFallback.Nearest);
 
-            // Получаем границы рабочего экрана
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
             int screenW = displayArea.WorkArea.Width;
             int screenH = displayArea.WorkArea.Height;
             int screenX = displayArea.WorkArea.X;
             int screenY = displayArea.WorkArea.Y;
 
-            // Базовая позиция (справа-снизу от мышки с отступом 20px)
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅпїЅпїЅ-пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ 20px)
             int targetX = lpPoint.X + 20;
             int targetY = lpPoint.Y + 20;
 
-            // --- ПРОВЕРКА ПО ГОРИЗОНТАЛИ (X) ---
-            // Если правый край окна вылезает за экран
+            // --- пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (X) ---
+            // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
             if (targetX + WIN_WIDTH > screenX + screenW)
             {
-                // Ставим окно СЛЕВА от курсора
+                // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
                 targetX = lpPoint.X - WIN_WIDTH - 20;
             }
 
-            // --- ПРОВЕРКА ПО ВЕРТИКАЛИ (Y) ---
-            // Если нижний край окна вылезает за экран
+            // --- пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (Y) ---
+            // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
             if (targetY + WIN_HEIGHT > screenY + screenH)
             {
-                // Ставим окно СВЕРХУ от курсора
+                // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
                 targetY = lpPoint.Y - WIN_HEIGHT - 20;
             }
 
-            // Финальная страховка (чтобы не улетело в минус за левый/верхний край)
+            // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ/пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ)
             if (targetX < screenX) targetX = screenX;
             if (targetY < screenY) targetY = screenY;
 

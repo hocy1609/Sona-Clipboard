@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace Sona_Clipboard
+namespace Sona_Clipboard.Services
 {
     public static class HotKeyHelper
     {
