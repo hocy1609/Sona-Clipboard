@@ -235,6 +235,13 @@ namespace Sona_Clipboard.Views
                     if (_previewWindow.Visible && _fullHistory.Count > _currentPreviewIndex)
                     {
                         var item = _fullHistory[_currentPreviewIndex];
+                        
+                        // Lazy load for timer-based copy
+                        if (item.Type == "Image" && item.ImageBytes == null)
+                        {
+                            item.ImageBytes = await _databaseService.GetFullImageBytesAsync(item.Id);
+                        }
+
                         await _clipboardService.CopyToClipboard(item);
                         _previewWindow.Hide();
                         await _keyboardService.PasteSelectionAsync();
@@ -273,8 +280,7 @@ namespace Sona_Clipboard.Views
             _hotKeyService.Register(id, mods, vk);
         }
 
-        private void ShowPreview(bool goDeeper)
-
+        private async void ShowPreview(bool goDeeper)
         {
             if (_fullHistory.Count == 0) return;
 
@@ -291,11 +297,16 @@ namespace Sona_Clipboard.Views
             if (_currentPreviewIndex < 0) _currentPreviewIndex = 0;
             if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = _fullHistory.Count - 1;
 
-                        var item = _fullHistory[_currentPreviewIndex];
+            var item = _fullHistory[_currentPreviewIndex];
 
-                        _previewWindow.ShowItem(item, _currentPreviewIndex + 1);
+            // Lazy load for preview
+            if (item.Type == "Image" && item.ImageBytes == null)
+            {
+                item.ImageBytes = await _databaseService.GetFullImageBytesAsync(item.Id);
+            }
 
-                    }
+            _previewWindow.ShowItem(item, _currentPreviewIndex + 1);
+        }
 
             
 
@@ -304,35 +315,66 @@ namespace Sona_Clipboard.Views
             this.DispatcherQueue.TryEnqueue(async () =>
             {
                 _fullHistory.Insert(0, item);
-                await _databaseService.SaveItemAsync(item);
+                await _databaseService.SaveItemAsync(item, item.ThumbnailBytes); 
                 await TrimHistoryAsync();
                 UpdateListUI(SearchBox.Text);
                 _currentPreviewIndex = 0;
             });
         }
 
-        private void UpdateListUI(string query = "")
+        private async void PinButton_Click(object sender, RoutedEventArgs e)
         {
-            ClipboardList.Items.Clear();
-            var itemsToShow = string.IsNullOrWhiteSpace(query) ? _fullHistory : _fullHistory.Where(i => i.Content != null && i.Content.ToLower().Contains(query.ToLower())).ToList();
-            foreach (var item in itemsToShow) ClipboardList.Items.Add(item);
-            EmptyStatusText.Visibility = (ClipboardList.Items.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
+            if (sender is Button btn && btn.DataContext is ClipboardItem item)
+            {
+                item.IsPinned = !item.IsPinned;
+                await _databaseService.TogglePinAsync(item.Id, item.IsPinned);
+                LoadHistoryFromDb(); // Reload to re-sort pinned items to top
+            }
         }
 
-        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) { UpdateListUI(SearchBox.Text); }
+        private async void DeleteButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.DataContext is ClipboardItem item)
+            {
+                await _databaseService.DeleteItemAsync(item.Id);
+                _fullHistory.Remove(item);
+                UpdateListUI(SearchBox.Text);
+            }
+        }
 
         private async void ClipboardList_ItemClick(object sender, ItemClickEventArgs e)
         {
             if (e.ClickedItem is ClipboardItem item)
             {
                 _currentPreviewIndex = _fullHistory.IndexOf(item);
+                
+                // Lazy Load full image if it's an image and bytes are missing
+                if (item.Type == "Image" && item.ImageBytes == null)
+                {
+                    item.ImageBytes = await _databaseService.GetFullImageBytesAsync(item.Id);
+                }
+
                 await _clipboardService.CopyToClipboard(item);
             }
         }
 
-        private async void LoadHistoryFromDb()
+        private void UpdateListUI(string query = "")
         {
-            _fullHistory = await _databaseService.LoadHistoryAsync();
+            ClipboardList.Items.Clear();
+            // Note: We now filter at DB level, so query parameter here is mainly for UI state if needed
+            // But we already updated the LoadHistoryFromDb to do the work.
+            foreach (var item in _fullHistory) ClipboardList.Items.Add(item);
+            EmptyStatusText.Visibility = (ClipboardList.Items.Count == 0) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) 
+        {
+            LoadHistoryFromDb(SearchBox.Text); 
+        }
+
+        private async void LoadHistoryFromDb(string? query = null)
+        {
+            _fullHistory = await _databaseService.LoadHistoryAsync(query);
             UpdateListUI();
         }
 

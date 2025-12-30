@@ -9,9 +9,13 @@ namespace Sona_Clipboard.Models
         public int Id { get; set; }
         public string Type { get; set; } = "Text";
         public string? Content { get; set; }
+        public string? RtfContent { get; set; }
+        public string? HtmlContent { get; set; }
         public byte[]? ImageBytes { get; set; }
         public string Timestamp { get; set; } = "";
         public BitmapImage? Thumbnail { get; set; }
+        public byte[]? ThumbnailBytes { get; set; }
+        public bool IsPinned { get; set; } = false;
 
         // --- НОВОЕ: Умное свойство для отображения в списке ---
         public string DisplayText

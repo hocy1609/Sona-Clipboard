@@ -27,10 +27,11 @@ namespace Sona_Clipboard.Services
             if (_isCopiedByMe) { _isCopiedByMe = false; return; }
 
             DataPackageView? view = null;
-            // Retry to get content as it might be locked
+            // Retry with exponential backoff
             for (int i = 0; i < 5; i++) 
             { 
-                try { view = Clipboard.GetContent(); break; } catch { await Task.Delay(100); } 
+                try { view = Clipboard.GetContent(); break; } 
+                catch { await Task.Delay(10 * (int)Math.Pow(2, i)); } 
             }
             if (view == null) return;
 
@@ -39,7 +40,17 @@ namespace Sona_Clipboard.Services
                 if (view.Contains(StandardDataFormats.Text))
                 {
                     string text = await view.GetTextAsync();
-                    ClipboardChanged?.Invoke(new ClipboardItem { Type = "Text", Content = text, Timestamp = DateTime.Now.ToString("HH:mm") });
+                    string? rtf = view.Contains(StandardDataFormats.Rtf) ? await view.GetRtfAsync() : null;
+                    string? html = view.Contains(StandardDataFormats.Html) ? await view.GetHtmlFormatAsync() : null;
+
+                    ClipboardChanged?.Invoke(new ClipboardItem 
+                    { 
+                        Type = "Text", 
+                        Content = text, 
+                        RtfContent = rtf,
+                        HtmlContent = html,
+                        Timestamp = DateTime.Now.ToString("HH:mm") 
+                    });
                 }
                 else if (view.Contains(StandardDataFormats.StorageItems))
                 {
@@ -61,14 +72,21 @@ namespace Sona_Clipboard.Services
                         byte[] imageBytes = new byte[stream.Size];
                         using (DataReader reader = new DataReader(stream)) { await reader.LoadAsync((uint)stream.Size); reader.ReadBytes(imageBytes); }
 
+                        // Generate Thumbnail (max 100px)
+                        byte[]? thumbBytes = await CreateThumbnailAsync(imageStreamRef, 100);
+
                         var item = new ClipboardItem
                         {
                             Type = "Image",
                             Content = "Image " + DateTime.Now.ToString("HH:mm"),
                             ImageBytes = imageBytes,
+                            ThumbnailBytes = thumbBytes,
                             Timestamp = DateTime.Now.ToString("HH:mm"),
-                            Thumbnail = await BytesToImage(imageBytes)
+                            Thumbnail = await BytesToImage(thumbBytes ?? imageBytes) // Show thumb in UI
                         };
+                        
+                        // We attach thumbBytes to a temporary field if we want, or just pass it to Invoke
+                        // For simplicity, let's assume SaveItemAsync will handle it.
                         ClipboardChanged?.Invoke(item);
                     }
                 }
@@ -77,6 +95,37 @@ namespace Sona_Clipboard.Services
             {
                 System.Diagnostics.Debug.WriteLine($"Clipboard error: {ex.Message}");
             }
+        }
+
+        private async Task<byte[]?> CreateThumbnailAsync(RandomAccessStreamReference imageRef, uint pixelSize)
+        {
+            try
+            {
+                using (var stream = await imageRef.OpenReadAsync())
+                {
+                    var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream);
+                    var softwareBitmap = await decoder.GetSoftwareBitmapAsync();
+
+                    using (var memoryStream = new InMemoryRandomAccessStream())
+                    {
+                        var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(Windows.Graphics.Imaging.BitmapEncoder.JpegEncoderId, memoryStream);
+                        encoder.SetSoftwareBitmap(softwareBitmap);
+                        encoder.BitmapTransform.ScaledWidth = pixelSize;
+                        encoder.BitmapTransform.ScaledHeight = (uint)(decoder.OrientedPixelHeight * pixelSize / decoder.OrientedPixelWidth);
+                        encoder.BitmapTransform.InterpolationMode = Windows.Graphics.Imaging.BitmapInterpolationMode.Fant;
+                        await encoder.FlushAsync();
+
+                        byte[] bytes = new byte[memoryStream.Size];
+                        using (var reader = new DataReader(memoryStream))
+                        {
+                            await reader.LoadAsync((uint)memoryStream.Size);
+                            reader.ReadBytes(bytes);
+                        }
+                        return bytes;
+                    }
+                }
+            }
+            catch { return null; }
         }
 
         public async Task CopyToClipboard(ClipboardItem item)
@@ -88,7 +137,12 @@ namespace Sona_Clipboard.Services
 
             try
             {
-                if (item.Type == "Text" && item.Content != null) package.SetText(item.Content);
+                if (item.Type == "Text" && item.Content != null)
+                {
+                    package.SetText(item.Content);
+                    if (!string.IsNullOrEmpty(item.RtfContent)) package.SetRtf(item.RtfContent);
+                    if (!string.IsNullOrEmpty(item.HtmlContent)) package.SetHtmlFormat(item.HtmlContent);
+                }
                 else if (item.Type == "Image" && item.ImageBytes != null)
                 {
                     InMemoryRandomAccessStream stream = new InMemoryRandomAccessStream();
