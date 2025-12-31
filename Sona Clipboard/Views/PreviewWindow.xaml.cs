@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.Storage.Streams;
 using WinRT.Interop;
+using System.Threading.Tasks;
 
 using Sona_Clipboard.Models;
 
@@ -15,10 +16,10 @@ namespace Sona_Clipboard.Views
     public sealed partial class PreviewWindow : Window
     {
         private AppWindow _appWindow;
+        private int _currentWidth = 400;
+        private int _currentHeight = 300;
 
-        // ������� ����
-        private const int WIN_WIDTH = 300;
-        private const int WIN_HEIGHT = 220;
+        public new bool Visible => _appWindow != null && _appWindow.IsVisible;
 
         public PreviewWindow()
         {
@@ -29,16 +30,14 @@ namespace Sona_Clipboard.Views
             _appWindow = AppWindow.GetFromWindowId(windowId);
 
             var presenter = OverlappedPresenter.Create();
-            // ����������� ���� ��� �����
             presenter.SetBorderAndTitleBar(false, false);
             presenter.IsResizable = false;
             presenter.IsAlwaysOnTop = true;
             _appWindow.SetPresenter(presenter);
 
-            _appWindow.Resize(new Windows.Graphics.SizeInt32(WIN_WIDTH, WIN_HEIGHT));
+            _appWindow.Resize(new Windows.Graphics.SizeInt32(_currentWidth, _currentHeight));
         }
 
-        // ���� ����� �����, ����� ������� ���� ����� �������� ������
         public void Hide()
         {
             _appWindow.Hide();
@@ -46,69 +45,77 @@ namespace Sona_Clipboard.Views
 
         public async void ShowItem(ClipboardItem item, int index)
         {
-            IndexText.Text = $"���� #{index} ({item.Timestamp})";
+            IndexText.Text = $"Clip #{index} ({item.Timestamp})";
+            
+            // Default sizes
+            int targetWidth = 400;
+            int targetHeight = 300;
 
-            if (item.Type == "Image" && item.ImageBytes != null)
+            try
             {
-                PreviewText.Visibility = Visibility.Collapsed;
-                PreviewImage.Visibility = Visibility.Visible;
-
-                using (InMemoryRandomAccessStream stream = new InMemoryRandomAccessStream())
+                if (item.Type == "Image" && item.ImageBytes != null)
                 {
-                    await stream.WriteAsync(item.ImageBytes.AsBuffer());
-                    stream.Seek(0);
-                    BitmapImage bitmap = new BitmapImage();
-                    await bitmap.SetSourceAsync(stream);
-                    PreviewImage.Source = bitmap;
+                    TextScroll.Visibility = Visibility.Collapsed;
+                    SvgViewbox.Visibility = Visibility.Collapsed;
+                    ImageViewbox.Visibility = Visibility.Visible;
+
+                    using (InMemoryRandomAccessStream stream = new InMemoryRandomAccessStream())
+                    {
+                        await stream.WriteAsync(item.ImageBytes.AsBuffer());
+                        stream.Seek(0);
+                        
+                        BitmapImage bitmap = new BitmapImage();
+                        bitmap.AutoPlay = true; 
+                        await bitmap.SetSourceAsync(stream);
+                        PreviewImage.Source = bitmap;
+
+                        // Adaptive aspect ratio
+                        double aspect = (double)bitmap.PixelWidth / bitmap.PixelHeight;
+                        if (aspect > 1.5) { targetWidth = 500; targetHeight = (int)(500 / aspect); }
+                        else if (aspect < 0.7) { targetHeight = 500; targetWidth = (int)(500 * aspect); }
+                        else { targetWidth = 450; targetHeight = (int)(450 / aspect); }
+                    }
+                }
+                else
+                {
+                    ImageViewbox.Visibility = Visibility.Collapsed;
+                    SvgViewbox.Visibility = Visibility.Collapsed;
+                    TextScroll.Visibility = Visibility.Visible;
+                    PreviewText.Text = item.Content ?? "";
+                    
+                    // Adaptive height for text
+                    int lineCount = (item.Content ?? "").Split('\n').Length;
+                    targetHeight = Math.Clamp(120 + (lineCount * 22), 180, 500);
+                    targetWidth = 450;
                 }
             }
-            else
-            {
-                PreviewImage.Visibility = Visibility.Collapsed;
-                PreviewText.Visibility = Visibility.Visible;
-                PreviewText.Text = item.Content ?? "";
-            }
+            catch { }
+
+            _currentWidth = targetWidth;
+            _currentHeight = targetHeight;
+            _appWindow.Resize(new Windows.Graphics.SizeInt32(targetWidth, targetHeight));
 
             SmartMoveToCursor();
-            this.Activate();
+            _appWindow.Show();
         }
 
-        // ����� ���������������� (���/��� � �����/������ �� �������)
         private void SmartMoveToCursor()
         {
             GetCursorPos(out POINT lpPoint);
 
-            IntPtr hWnd = WindowNative.GetWindowHandle(this);
-            WindowId windowId = Win32Interop.GetWindowIdFromWindow(hWnd);
             DisplayArea displayArea = DisplayArea.GetFromPoint(new Windows.Graphics.PointInt32(lpPoint.X, lpPoint.Y), DisplayAreaFallback.Nearest);
 
-            // �������� ������� �������� ������
             int screenW = displayArea.WorkArea.Width;
             int screenH = displayArea.WorkArea.Height;
             int screenX = displayArea.WorkArea.X;
             int screenY = displayArea.WorkArea.Y;
 
-            // ������� ������� (������-����� �� ����� � �������� 20px)
             int targetX = lpPoint.X + 20;
             int targetY = lpPoint.Y + 20;
 
-            // --- �������� �� ����������� (X) ---
-            // ���� ������ ���� ���� �������� �� �����
-            if (targetX + WIN_WIDTH > screenX + screenW)
-            {
-                // ������ ���� ����� �� �������
-                targetX = lpPoint.X - WIN_WIDTH - 20;
-            }
+            if (targetX + _currentWidth > screenX + screenW) targetX = lpPoint.X - _currentWidth - 20;
+            if (targetY + _currentHeight > screenY + screenH) targetY = lpPoint.Y - _currentHeight - 20;
 
-            // --- �������� �� ��������� (Y) ---
-            // ���� ������ ���� ���� �������� �� �����
-            if (targetY + WIN_HEIGHT > screenY + screenH)
-            {
-                // ������ ���� ������ �� �������
-                targetY = lpPoint.Y - WIN_HEIGHT - 20;
-            }
-
-            // ��������� ��������� (����� �� ������� � ����� �� �����/������� ����)
             if (targetX < screenX) targetX = screenX;
             if (targetY < screenY) targetY = screenY;
 

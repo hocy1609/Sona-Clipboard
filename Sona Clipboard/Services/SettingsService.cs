@@ -17,7 +17,8 @@ namespace Sona_Clipboard.Services
         public bool HkPrevAlt { get; set; } = true;
         public int HkPrevKey { get; set; } = 18;
 
-        public string HistoryLimit { get; set; } = "20";
+        public double HistoryLimitGb { get; set; } = 10.0;
+        public int LastUsedIndex { get; set; } = 0;
         public bool IsFirstRun { get; set; } = true;
         public bool IsAutoStart { get; set; } = false;
     }

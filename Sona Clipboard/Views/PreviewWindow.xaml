@@ -14,10 +14,7 @@
     <Grid Background="Transparent" Padding="15">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <!-- Заголовок -->
             <RowDefinition Height="*"/>
-            <!-- Контент -->
-            <!-- Строка для кнопки удалена, так как кнопки больше нет -->
         </Grid.RowDefinitions>
 
         <!-- Заголовок -->
@@ -26,22 +23,24 @@
             <TextBlock x:Name="IndexText" Text="Clip #1" FontWeight="Bold" Opacity="0.7" FontSize="12"/>
         </StackPanel>
 
-        <!-- Контент (Текст или Картинка) -->
-        <Border Grid.Row="1" CornerRadius="8" Background="#10FFFFFF" Padding="10">
-            <Grid>
-                <TextBlock x:Name="PreviewText" 
-                           TextWrapping="Wrap" 
-                           TextTrimming="CharacterEllipsis" 
-                           MaxLines="6"
-                           VerticalAlignment="Center" HorizontalAlignment="Center"
-                           FontSize="14"/>
+        <!-- Контент -->
+        <Border Grid.Row="1" CornerRadius="12" Background="#20FFFFFF" Padding="2" BorderThickness="1" BorderBrush="#20FFFFFF">
+            <Grid x:Name="ContentHost" CornerRadius="10" Background="#15000000">
+                <ScrollViewer x:Name="TextScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="15">
+                    <TextBlock x:Name="PreviewText" 
+                               TextWrapping="Wrap" 
+                               FontSize="14"
+                               LineHeight="20"/>
+                </ScrollViewer>
 
-                <Image x:Name="PreviewImage" 
-                       Stretch="Uniform"
-                       Visibility="Collapsed"/>
+                <Viewbox x:Name="ImageViewbox" Visibility="Collapsed">
+                    <Image x:Name="PreviewImage" Stretch="Uniform" />
+                </Viewbox>
+                
+                <Viewbox x:Name="SvgViewbox" Visibility="Collapsed">
+                    <Image x:Name="PreviewSvg" Stretch="Uniform" />
+                </Viewbox>
             </Grid>
         </Border>
-
-        <!-- КНОПКА "СКОПИРОВАТЬ" УДАЛЕНА, ЧТОБЫ ИСПРАВИТЬ ОШИБКУ -->
     </Grid>
 </Window>

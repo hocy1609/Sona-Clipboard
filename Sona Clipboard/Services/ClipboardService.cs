@@ -10,10 +10,19 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Sona_Clipboard.Models;
 
+using System.Runtime.InteropServices;
+using System.Diagnostics;
+
 namespace Sona_Clipboard.Services
 {
     public class ClipboardService
     {
+        [DllImport("user32.dll")]
+        static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
         private bool _isCopiedByMe = false;
         public event Action<ClipboardItem>? ClipboardChanged;
 
@@ -22,9 +31,39 @@ namespace Sona_Clipboard.Services
             Clipboard.ContentChanged += Clipboard_ContentChanged;
         }
 
+        private (string AppName, string ProcessName) GetActiveProcessInfo()
+        {
+            try
+            {
+                IntPtr hWnd = GetForegroundWindow();
+                if (hWnd == IntPtr.Zero) return ("Unknown", "Unknown");
+
+                uint processId;
+                GetWindowThreadProcessId(hWnd, out processId);
+                
+                using (var process = Process.GetProcessById((int)processId))
+                {
+                    string processName = process.ProcessName;
+                    // Try to get a more friendly name (Main window title)
+                    string appName = string.IsNullOrWhiteSpace(process.MainWindowTitle) 
+                        ? processName 
+                        : process.MainWindowTitle;
+                    
+                    // Cleanup title (usually apps have 'Title - AppName' or just 'AppName')
+                    if (appName.Contains(" - "))
+                        appName = appName.Split(" - ").Last();
+
+                    return (appName, processName);
+                }
+            }
+            catch { return ("Unknown", "Unknown"); }
+        }
+
         private async void Clipboard_ContentChanged(object? sender, object? e)
         {
             if (_isCopiedByMe) { _isCopiedByMe = false; return; }
+
+            var (appName, processName) = GetActiveProcessInfo();
 
             DataPackageView? view = null;
             // Retry with exponential backoff
@@ -49,7 +88,9 @@ namespace Sona_Clipboard.Services
                         Content = text, 
                         RtfContent = rtf,
                         HtmlContent = html,
-                        Timestamp = DateTime.Now.ToString("HH:mm") 
+                        Timestamp = DateTime.Now.ToString("HH:mm"),
+                        SourceAppName = appName,
+                        SourceProcessName = processName
                     });
                 }
                 else if (view.Contains(StandardDataFormats.StorageItems))
@@ -58,11 +99,36 @@ namespace Sona_Clipboard.Services
                     if (storageItems.Count == 0) return;
 
                     var paths = new List<string>();
-                    foreach (var item in storageItems) if (!string.IsNullOrEmpty(item.Path)) paths.Add(item.Path);
+                    long totalSize = 0;
+                    string extensions = "";
+
+                    foreach (var item in storageItems) 
+                    {
+                        if (!string.IsNullOrEmpty(item.Path)) 
+                        {
+                            paths.Add(item.Path);
+                            try {
+                                var info = new FileInfo(item.Path);
+                                if (info.Exists) {
+                                    totalSize += info.Length;
+                                    extensions += info.Extension.ToLower() + " ";
+                                }
+                            } catch {}
+                        }
+                    }
                     if (paths.Count == 0) return;
 
                     string content = string.Join(Environment.NewLine, paths);
-                    ClipboardChanged?.Invoke(new ClipboardItem { Type = "File", Content = content, Timestamp = DateTime.Now.ToString("HH:mm") });
+                    ClipboardChanged?.Invoke(new ClipboardItem 
+                    { 
+                        Type = "File", 
+                        Content = content, 
+                        Timestamp = DateTime.Now.ToString("HH:mm"),
+                        SourceAppName = appName,
+                        SourceProcessName = processName,
+                        // Store metadata in a way FTS can index it
+                        RtfContent = $"Size:{totalSize} Ext:{extensions.Trim()}" 
+                    });
                 }
                 else if (view.Contains(StandardDataFormats.Bitmap))
                 {
@@ -82,11 +148,11 @@ namespace Sona_Clipboard.Services
                             ImageBytes = imageBytes,
                             ThumbnailBytes = thumbBytes,
                             Timestamp = DateTime.Now.ToString("HH:mm"),
-                            Thumbnail = await BytesToImage(thumbBytes ?? imageBytes) // Show thumb in UI
+                            Thumbnail = await BytesToImage(thumbBytes ?? imageBytes), // Show thumb in UI
+                            SourceAppName = appName,
+                            SourceProcessName = processName
                         };
                         
-                        // We attach thumbBytes to a temporary field if we want, or just pass it to Invoke
-                        // For simplicity, let's assume SaveItemAsync will handle it.
                         ClipboardChanged?.Invoke(item);
                     }
                 }

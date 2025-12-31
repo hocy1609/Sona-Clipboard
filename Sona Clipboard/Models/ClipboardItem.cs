@@ -16,6 +16,8 @@ namespace Sona_Clipboard.Models
         public BitmapImage? Thumbnail { get; set; }
         public byte[]? ThumbnailBytes { get; set; }
         public bool IsPinned { get; set; } = false;
+        public string? SourceAppName { get; set; }
+        public string? SourceProcessName { get; set; }
 
         // --- НОВОЕ: Умное свойство для отображения в списке ---
         public string DisplayText

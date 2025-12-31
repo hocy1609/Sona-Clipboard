@@ -64,10 +64,14 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBox x:Name="SearchBox" PlaceholderText="Поиск..." TextChanged="SearchBox_TextChanged"/>
+                    <CheckBox x:Name="ArchiveSearchCheck" Content="В архиве" Grid.Column="1" Margin="10,0,0,0" 
+                              Checked="ArchiveSearchCheck_Changed" Unchecked="ArchiveSearchCheck_Changed"
+                              VerticalAlignment="Center" FontSize="12"/>
                     <Button x:Name="SettingsButton" Content="&#xE713;" FontFamily="Segoe MDL2 Assets" 
-                            Grid.Column="1" Margin="10,0,0,0" Click="SettingsButton_Click"/>
+                            Grid.Column="2" Margin="10,0,0,0" Click="SettingsButton_Click"/>
                 </Grid>
 
                 <ListView x:Name="ClipboardList" Grid.Row="1" SelectionMode="None" IsItemClickEnabled="True" ItemClick="ClipboardList_ItemClick">
@@ -88,6 +92,7 @@
                                     <TextBlock Text="{Binding DisplayText}" TextTrimming="CharacterEllipsis" MaxLines="1" FontWeight="Medium"/>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <TextBlock Text="{Binding Timestamp}" FontSize="10" Opacity="0.5"/>
+                                        <TextBlock Text="{Binding SourceAppName}" FontSize="10" Opacity="0.5" Foreground="LightSkyBlue"/>
                                         <TextBlock Text="📌 Закреплено" FontSize="10" Foreground="Gold" 
                                                    Visibility="{Binding IsPinned, Converter={StaticResource BoolToVisibilityConverter}}"/>
                                     </StackPanel>
@@ -218,15 +223,55 @@
 
                         <Border Background="#0FFFFFFF" CornerRadius="8" Padding="15">
                             <StackPanel Spacing="10">
-                                <TextBlock Text="Очистка" FontWeight="Bold"/>
+                                <TextBlock Text="Резервное копирование" FontWeight="Bold"/>
+                                <TextBlock x:Name="DbHealthText" Text="Размер БД: 0 MB" Opacity="0.7" FontSize="12"/>
+                                
+                                <TextBox x:Name="BackupPasswordBox" PlaceholderText="Пароль для шифрования (опционально)" 
+                                         Header="Защита бэкапа" FontSize="12"/>
+                                
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="Создать бэкап" Click="CreateBackup_Click" HorizontalAlignment="Stretch"/>
+                                    <Button Content="Восстановить" Click="RestoreBackup_Click" Grid.Column="1" HorizontalAlignment="Stretch"/>
+                                </Grid>
+                                
+                                <TextBlock Text="Политика ротации: Храним 5 последних копий" FontSize="10" Opacity="0.5"/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="#0FFFFFFF" CornerRadius="8" Padding="15">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Очистка и Оптимизация" FontWeight="Bold"/>
                                 <StackPanel Orientation="Horizontal" Spacing="10">
-                                    <TextBox x:Name="HistoryLimitBox" Text="100" Width="60"/>
-                                    <Button Content="Лимит записей" Click="ApplyLimit_Click"/>
+                                    <TextBox x:Name="HistoryLimitBox" Text="10.0" Width="60"/>
+                                    <TextBlock Text="GB" VerticalAlignment="Center" Opacity="0.7"/>
+                                    <Button Content="Применить лимит" Click="ApplyLimit_Click"/>
                                 </StackPanel>
-                                <Button Content="Удалить дубликаты" Click="RemoveDuplicates_Click"/>
-                                <Button Content="Удалить все картинки" Click="RemoveImages_Click"/>
-                                <Button Content="Удалить тяжелые (>2MB)" Click="RemoveHeavy_Click"/>
-                                <Button Content="Очистить все" Foreground="Red" Click="ClearHistory_Click"/>
+                                <Button Content="Оптимизировать БД (Vacuum)" Click="OptimizeDb_Click" HorizontalAlignment="Stretch"/>
+                                <Button Content="Удалить дубликаты" Click="RemoveDuplicates_Click" HorizontalAlignment="Stretch"/>
+                                <Button Content="Очистить все" Foreground="Red" Click="ClearHistory_Click" HorizontalAlignment="Stretch"/>
+                                
+                                <TextBlock Text="По приложениям" FontWeight="Bold" Margin="0,10,0,0"/>
+                                <ItemsControl x:Name="AppStatsList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,5">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Key}" VerticalAlignment="Center" FontSize="12"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding Value}" Opacity="0.5" Margin="10,0" VerticalAlignment="Center" FontSize="12"/>
+                                                <Button Grid.Column="2" Content="Очистить" Click="DeleteByApp_Click" Tag="{Binding Key}" Padding="8,2" FontSize="12"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                
                                 <TextBlock x:Name="MaintenanceStatus" Foreground="LimeGreen" FontSize="12"/>
                             </StackPanel>
                         </Border>

@@ -30,24 +30,62 @@ namespace Sona_Clipboard.Services
                 using (var db = new SqliteConnection($"Filename={_dbPath}"))
                 {
                     db.Open();
-                    // Update schema: add ThumbnailBytes and IsPinned
-                    String tableCommand = "CREATE TABLE IF NOT EXISTS History (" +
+
+                    // 1. Performance Optimization PRAGMAs
+                    new SqliteCommand("PRAGMA journal_mode=WAL;", db).ExecuteNonQuery();
+                    new SqliteCommand("PRAGMA synchronous=NORMAL;", db).ExecuteNonQuery();
+                    new SqliteCommand("PRAGMA temp_store=MEMORY;", db).ExecuteNonQuery();
+                    new SqliteCommand("PRAGMA mmap_size=30000000000;", db).ExecuteNonQuery(); // Allow memory mapping for large DBs
+
+                    // 2. Schema Creation
+                    string tableCommand = "CREATE TABLE IF NOT EXISTS History (" +
                                           "Id INTEGER PRIMARY KEY, " + 
                                           "Type NVARCHAR(50), " +
-                                          "Content NVARCHAR(2048) NULL, " + 
+                                          "Content TEXT NULL, " + 
                                           "ImageBytes BLOB NULL, " + 
-                                          "Timestamp NVARCHAR(50), " +
+                                          "Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, " +
                                           "ThumbnailBytes BLOB NULL, " +
                                           "IsPinned INTEGER DEFAULT 0, " +
                                           "RtfContent TEXT NULL, " +
-                                          "HtmlContent TEXT NULL)";
+                                          "HtmlContent TEXT NULL, " +
+                                          "SourceAppName TEXT NULL, " +
+                                          "SourceProcessName TEXT NULL, " +
+                                          "ContentHash TEXT NULL)"; // For deduplication
                     new SqliteCommand(tableCommand, db).ExecuteNonQuery();
 
-                    // Migration for existing databases
-                    try { new SqliteCommand("ALTER TABLE History ADD COLUMN ThumbnailBytes BLOB NULL", db).ExecuteNonQuery(); } catch { }
-                    try { new SqliteCommand("ALTER TABLE History ADD COLUMN IsPinned INTEGER DEFAULT 0", db).ExecuteNonQuery(); } catch { }
-                    try { new SqliteCommand("ALTER TABLE History ADD COLUMN RtfContent TEXT NULL", db).ExecuteNonQuery(); } catch { }
-                    try { new SqliteCommand("ALTER TABLE History ADD COLUMN HtmlContent TEXT NULL", db).ExecuteNonQuery(); } catch { }
+                    // 3. Automated B-Tree Indexing
+                    new SqliteCommand("CREATE INDEX IF NOT EXISTS idx_history_pinned_id ON History (IsPinned DESC, Id DESC);", db).ExecuteNonQueryAsync();
+                    new SqliteCommand("CREATE INDEX IF NOT EXISTS idx_history_source ON History (SourceProcessName);", db).ExecuteNonQueryAsync();
+
+                    // 4. FTS5 Virtual Table for Mega-Fast Search
+                    new SqliteCommand("CREATE VIRTUAL TABLE IF NOT EXISTS History_FTS USING fts5(" +
+                                      "Content, SourceAppName, Type, " +
+                                      "content='History', content_rowid='Id');", db).ExecuteNonQuery();
+                    
+                    // Triggers to keep FTS in sync
+                    string[] triggers = {
+                        "CREATE TRIGGER IF NOT EXISTS History_ai AFTER INSERT ON History BEGIN " +
+                        "INSERT INTO History_FTS(rowid, Content, SourceAppName, Type) VALUES (new.Id, new.Content, new.SourceAppName, new.Type); END;",
+                        
+                        "CREATE TRIGGER IF NOT EXISTS History_ad AFTER DELETE ON History BEGIN " +
+                        "INSERT INTO History_FTS(History_FTS, rowid, Content, SourceAppName, Type) VALUES('delete', old.Id, old.Content, old.SourceAppName, old.Type); END;",
+                        
+                        "CREATE TRIGGER IF NOT EXISTS History_au AFTER UPDATE ON History BEGIN " +
+                        "INSERT INTO History_FTS(History_FTS, rowid, Content, SourceAppName, Type) VALUES('delete', old.Id, old.Content, old.SourceAppName, old.Type); " +
+                        "INSERT INTO History_FTS(rowid, Content, SourceAppName, Type) VALUES (new.Id, new.Content, new.SourceAppName, new.Type); END;"
+                    };
+                    foreach (var trigger in triggers) new SqliteCommand(trigger, db).ExecuteNonQuery();
+
+                    // 5. Migration and Maintenance
+                    try { new SqliteCommand("ALTER TABLE History ADD COLUMN SourceAppName TEXT NULL", db).ExecuteNonQuery(); } catch { }
+                    try { new SqliteCommand("ALTER TABLE History ADD COLUMN SourceProcessName TEXT NULL", db).ExecuteNonQuery(); } catch { }
+                    try { new SqliteCommand("ALTER TABLE History ADD COLUMN ContentHash TEXT NULL", db).ExecuteNonQuery(); } catch { }
+                    
+                    // Periodic Maintenance
+                    if (new Random().Next(0, 100) < 5) // 5% chance on startup
+                    {
+                        new SqliteCommand("PRAGMA optimize;", db).ExecuteNonQuery();
+                    }
                 }
             }
             catch (Exception ex)
@@ -60,19 +98,42 @@ namespace Sona_Clipboard.Services
         {
             try
             {
+                string hash = CalculateHash(item);
+                
                 using (var db = new SqliteConnection($"Filename={_dbPath}"))
                 {
                     await db.OpenAsync();
-                    var insertCommand = new SqliteCommand("INSERT INTO History (Type, Content, ImageBytes, Timestamp, ThumbnailBytes, IsPinned, RtfContent, HtmlContent) " +
-                                                          "VALUES (@Type, @Content, @ImageBytes, @Timestamp, @ThumbnailBytes, @IsPinned, @Rtf, @Html)", db);
+
+                    // Deduplication check
+                    if (!string.IsNullOrEmpty(hash))
+                    {
+                        var checkCmd = new SqliteCommand("SELECT Id FROM History WHERE ContentHash = @Hash LIMIT 1", db);
+                        checkCmd.Parameters.AddWithValue("@Hash", hash);
+                        var existingId = await checkCmd.ExecuteScalarAsync();
+                        
+                        if (existingId != null)
+                        {
+                            // Update timestamp of existing item instead of inserting duplicate
+                            var updateCmd = new SqliteCommand("UPDATE History SET Timestamp = CURRENT_TIMESTAMP WHERE Id = @Id", db);
+                            updateCmd.Parameters.AddWithValue("@Id", (long)existingId);
+                            await updateCmd.ExecuteNonQueryAsync();
+                            return;
+                        }
+                    }
+
+                    var insertCommand = new SqliteCommand("INSERT INTO History (Type, Content, ImageBytes, Timestamp, ThumbnailBytes, IsPinned, RtfContent, HtmlContent, ContentHash, SourceAppName, SourceProcessName) " +
+                                                          "VALUES (@Type, @Content, @ImageBytes, CURRENT_TIMESTAMP, @ThumbnailBytes, @IsPinned, @Rtf, @Html, @Hash, @SApp, @SProc)", db);
                     insertCommand.Parameters.AddWithValue("@Type", item.Type);
                     insertCommand.Parameters.AddWithValue("@Content", (object?)item.Content ?? DBNull.Value);
                     insertCommand.Parameters.AddWithValue("@ImageBytes", (object?)item.ImageBytes ?? DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@Timestamp", item.Timestamp);
                     insertCommand.Parameters.AddWithValue("@ThumbnailBytes", (object?)thumbnailBytes ?? DBNull.Value);
                     insertCommand.Parameters.AddWithValue("@IsPinned", item.IsPinned ? 1 : 0);
                     insertCommand.Parameters.AddWithValue("@Rtf", (object?)item.RtfContent ?? DBNull.Value);
                     insertCommand.Parameters.AddWithValue("@Html", (object?)item.HtmlContent ?? DBNull.Value);
+                    insertCommand.Parameters.AddWithValue("@Hash", (object?)hash ?? DBNull.Value);
+                    insertCommand.Parameters.AddWithValue("@SApp", (object?)item.SourceAppName ?? DBNull.Value);
+                    insertCommand.Parameters.AddWithValue("@SProc", (object?)item.SourceProcessName ?? DBNull.Value);
+                    
                     await insertCommand.ExecuteNonQueryAsync();
                 }
             }
@@ -82,26 +143,122 @@ namespace Sona_Clipboard.Services
             }
         }
 
-        public async Task<List<ClipboardItem>> LoadHistoryAsync(string? searchQuery = null)
+        public async Task<Dictionary<string, int>> GetAppUsageStatsAsync()
         {
+            var stats = new Dictionary<string, int>();
+            try
+            {
+                using (var db = new SqliteConnection($"Filename={_dbPath}"))
+                {
+                    await db.OpenAsync();
+                    var cmd = new SqliteCommand("SELECT IFNULL(SourceAppName, 'Unknown'), COUNT(*) as cnt FROM History GROUP BY SourceAppName ORDER BY cnt DESC", db);
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            stats[reader.GetString(0)] = reader.GetInt32(1);
+                        }
+                    }
+                }
+            }
+            catch { }
+            return stats;
+        }
+
+        public async Task DeleteBySourceAsync(string appName)
+        {
+            try
+            {
+                using (var db = new SqliteConnection($"Filename={_dbPath}"))
+                {
+                    await db.OpenAsync();
+                    var cmd = new SqliteCommand("DELETE FROM History WHERE SourceAppName = @AppName AND IsPinned = 0", db);
+                    cmd.Parameters.AddWithValue("@AppName", appName);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+            }
+            catch { }
+        }
+
+        private string CalculateHash(ClipboardItem item)
+        {
+            try
+            {
+                using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                {
+                    byte[] inputBytes;
+                    if (item.Type == "Image" && item.ImageBytes != null)
+                    {
+                        inputBytes = item.ImageBytes;
+                    }
+                    else if (!string.IsNullOrEmpty(item.Content))
+                    {
+                        inputBytes = System.Text.Encoding.UTF8.GetBytes(item.Content);
+                    }
+                    else return "";
+
+                    byte[] hashBytes = sha256.ComputeHash(inputBytes);
+                    return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                }
+            }
+            catch { return ""; }
+        }
+
+        public async Task<List<ClipboardItem>> LoadHistoryAsync(string? searchQuery = null, bool includeArchive = false)
+        {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var history = new List<ClipboardItem>();
+            string archivePath = Path.Combine(Path.GetDirectoryName(_dbPath)!, "SonaArchive.db");
+
             try
             {
                 using (var db = new SqliteConnection($"Filename={_dbPath}"))
                 {
                     await db.OpenAsync();
                     
-                    string sql = "SELECT Id, Type, Content, Timestamp, IsPinned, ThumbnailBytes, RtfContent, HtmlContent FROM History ";
-                    if (!string.IsNullOrWhiteSpace(searchQuery))
+                    // Register REGEXP function for advanced users
+                    db.CreateFunction("REGEXP", (string pattern, string input) => 
+                        System.Text.RegularExpressions.Regex.IsMatch(input ?? "", pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+
+                    string ftsQuery = ParseAdvancedQuery(searchQuery);
+                    
+                    string sql;
+                    if (includeArchive && File.Exists(archivePath))
                     {
-                        sql += "WHERE Content LIKE @query ";
+                        await new SqliteCommand($"ATTACH DATABASE '{archivePath}' AS Arc", db).ExecuteNonQueryAsync();
+                        
+                        sql = $@"SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.RtfContent, h.HtmlContent, h.SourceAppName 
+                                 FROM History h
+                                 JOIN History_FTS f ON f.rowid = h.Id
+                                 WHERE {ftsQuery}
+                                 UNION ALL
+                                 SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.RtfContent, h.HtmlContent, h.SourceAppName 
+                                 FROM Arc.History h
+                                 -- Note: Archive FTS would need separate virtual table, but we'll use LIKE for archive for simplicity or simple FTS if created
+                                 WHERE h.Content LIKE @likeQuery
+                                 ORDER BY IsPinned DESC, Id DESC LIMIT 100";
                     }
-                    sql += "ORDER BY IsPinned DESC, Id DESC LIMIT 100";
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(searchQuery))
+                        {
+                            sql = "SELECT Id, Type, Content, Timestamp, IsPinned, ThumbnailBytes, RtfContent, HtmlContent, SourceAppName FROM History ORDER BY IsPinned DESC, Id DESC LIMIT 100";
+                        }
+                        else
+                        {
+                            sql = $@"SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.RtfContent, h.HtmlContent, h.SourceAppName 
+                                     FROM History h
+                                     JOIN History_FTS f ON f.rowid = h.Id
+                                     WHERE {ftsQuery}
+                                     ORDER BY h.IsPinned DESC, h.Id DESC LIMIT 100";
+                        }
+                    }
 
                     var selectCommand = new SqliteCommand(sql, db);
                     if (!string.IsNullOrWhiteSpace(searchQuery))
                     {
-                        selectCommand.Parameters.AddWithValue("@query", $"%{searchQuery}%");
+                        selectCommand.Parameters.AddWithValue("@query", searchQuery);
+                        selectCommand.Parameters.AddWithValue("@likeQuery", $"%{searchQuery}%");
                     }
 
                     using (var query = await selectCommand.ExecuteReaderAsync())
@@ -113,7 +270,8 @@ namespace Sona_Clipboard.Services
                                 Id = query.GetInt32(0),
                                 Type = query.GetString(1),
                                 Timestamp = query.GetString(3),
-                                IsPinned = query.GetInt32(4) == 1
+                                IsPinned = query.GetInt32(4) == 1,
+                                SourceAppName = query.IsDBNull(8) ? null : query.GetString(8)
                             };
                             if (!await query.IsDBNullAsync(2)) item.Content = query.GetString(2);
                             if (!await query.IsDBNullAsync(6)) item.RtfContent = query.GetString(6);
@@ -127,29 +285,157 @@ namespace Sona_Clipboard.Services
                             history.Add(item);
                         }
                     }
+
+                    if (includeArchive && File.Exists(archivePath))
+                    {
+                        await new SqliteCommand("DETACH DATABASE Arc", db).ExecuteNonQueryAsync();
+                    }
                 }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"DB Load Error: {ex.Message}");
             }
+            finally
+            {
+                stopwatch.Stop();
+                if (stopwatch.ElapsedMilliseconds > 100)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[PERF WARNING] MegaSearch took {stopwatch.ElapsedMilliseconds}ms");
+                }
+            }
             return history;
         }
 
-        public async Task<byte[]?> GetFullImageBytesAsync(int id)
+        private string ParseAdvancedQuery(string? input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return "1=1";
+
+            var parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var ftsParts = new List<string>();
+            var sqlFilters = new List<string>();
+
+            foreach (var part in parts)
+            {
+                if (part.StartsWith("app:")) ftsParts.Add($"SourceAppName:{part.Substring(4)}*");
+                else if (part.StartsWith("type:")) ftsParts.Add($"Type:{part.Substring(5)}*");
+                else if (part.StartsWith("regex:")) sqlFilters.Add($"h.Content REGEXP '{part.Substring(6)}'");
+                else if (part.StartsWith("ext:")) ftsParts.Add($"Content:*{part.Substring(4)}*");
+                else ftsParts.Add($"{part}*");
+            }
+
+            string result = "";
+            if (ftsParts.Count > 0)
+            {
+                string combinedFts = string.Join(" AND ", ftsParts);
+                result = $"History_FTS MATCH '{combinedFts}'";
+            }
+
+            if (sqlFilters.Count > 0)
+            {
+                string combinedSql = string.Join(" AND ", sqlFilters);
+                result = string.IsNullOrEmpty(result) ? combinedSql : $"{result} AND {combinedSql}";
+            }
+
+            return string.IsNullOrEmpty(result) ? "1=1" : result;
+        }
+
+        public async Task PerformMaintenanceAsync()
         {
             try
             {
                 using (var db = new SqliteConnection($"Filename={_dbPath}"))
                 {
                     await db.OpenAsync();
+                    // Optimization and defragmentation
+                    await new SqliteCommand("PRAGMA optimize;", db).ExecuteNonQueryAsync();
+                    await new SqliteCommand("PRAGMA incremental_vacuum;", db).ExecuteNonQueryAsync();
+                }
+                
+                // 1-Hour RPO Backup
+                await BackupDatabaseAsync();
+            }
+            catch { }
+        }
+
+        private async Task BackupDatabaseAsync()
+        {
+            string backupPath = _dbPath + ".bak";
+            try
+            {
+                using (var source = new SqliteConnection($"Filename={_dbPath}"))
+                using (var destination = new SqliteConnection($"Filename={backupPath}"))
+                {
+                    await source.OpenAsync();
+                    await destination.OpenAsync();
+                    source.BackupDatabase(destination); // SQLite online backup API
+                }
+            }
+            catch { }
+        }
+
+        public async Task ArchiveOldItemsAsync(int daysToKeep = 30)
+        {
+            string archivePath = Path.Combine(Path.GetDirectoryName(_dbPath)!, "SonaArchive.db");
+            try
+            {
+                using (var db = new SqliteConnection($"Filename={_dbPath}"))
+                {
+                    await db.OpenAsync();
+                    
+                    // ATTACH archive database (Sharding strategy)
+                    var attachCmd = new SqliteCommand($"ATTACH DATABASE '{archivePath}' AS Archive", db);
+                    await attachCmd.ExecuteNonQueryAsync();
+
+                    // Create table in archive if not exists
+                    await new SqliteCommand("CREATE TABLE IF NOT EXISTS Archive.History AS SELECT * FROM History WHERE 1=0", db).ExecuteNonQueryAsync();
+
+                    // Move old unpinned items to archive
+                    var moveCmd = new SqliteCommand(
+                        "INSERT INTO Archive.History SELECT * FROM History " +
+                        "WHERE IsPinned = 0 AND datetime(Timestamp) < datetime('now', @days); " +
+                        "DELETE FROM History WHERE IsPinned = 0 AND datetime(Timestamp) < datetime('now', @days);", db);
+                    moveCmd.Parameters.AddWithValue("@days", $"-{daysToKeep} days");
+                    
+                    await moveCmd.ExecuteNonQueryAsync();
+                    await new SqliteCommand("DETACH DATABASE Archive", db).ExecuteNonQueryAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Archiving Error: {ex.Message}");
+            }
+        }
+
+        public async Task<byte[]?> GetFullImageBytesAsync(int id)
+        {
+            string archivePath = Path.Combine(Path.GetDirectoryName(_dbPath)!, "SonaArchive.db");
+            try
+            {
+                using (var db = new SqliteConnection($"Filename={_dbPath}"))
+                {
+                    await db.OpenAsync();
+                    
+                    // Try Main DB first
                     var cmd = new SqliteCommand("SELECT ImageBytes FROM History WHERE Id = @Id", db);
                     cmd.Parameters.AddWithValue("@Id", id);
                     var result = await cmd.ExecuteScalarAsync();
-                    return result as byte[];
+                    if (result is byte[] bytes) return bytes;
+
+                    // Try Archive DB
+                    if (File.Exists(archivePath))
+                    {
+                        await new SqliteCommand($"ATTACH DATABASE '{archivePath}' AS Arc", db).ExecuteNonQueryAsync();
+                        var arcCmd = new SqliteCommand("SELECT ImageBytes FROM Arc.History WHERE Id = @Id", db);
+                        arcCmd.Parameters.AddWithValue("@Id", id);
+                        var arcResult = await arcCmd.ExecuteScalarAsync();
+                        await new SqliteCommand("DETACH DATABASE Arc", db).ExecuteNonQueryAsync();
+                        return arcResult as byte[];
+                    }
                 }
             }
             catch { return null; }
+            return null;
         }
 
         public async Task TogglePinAsync(int id, bool isPinned)
@@ -178,6 +464,28 @@ namespace Sona_Clipboard.Services
                     var cmd = new SqliteCommand("DELETE FROM History WHERE Id = @Id AND IsPinned = 0", db);
                     cmd.Parameters.AddWithValue("@Id", id);
                     await cmd.ExecuteNonQueryAsync();
+                }
+            }
+            catch { }
+        }
+
+        public async Task TrimHistoryBySizeAsync(double maxGb)
+        {
+            try
+            {
+                long maxBytes = (long)(maxGb * 1024 * 1024 * 1024);
+                var fileInfo = new FileInfo(_dbPath);
+
+                if (fileInfo.Length > maxBytes)
+                {
+                    using (var db = new SqliteConnection($"Filename={_dbPath}"))
+                    {
+                        await db.OpenAsync();
+                        // Delete oldest unpinned items until size is manageable
+                        // Since we can't easily shrink file while open, we delete records and depend on Incremental Vacuum
+                        var cmd = new SqliteCommand("DELETE FROM History WHERE IsPinned = 0 AND Id IN (SELECT Id FROM History WHERE IsPinned = 0 ORDER BY Id ASC LIMIT 50)", db);
+                        await cmd.ExecuteNonQueryAsync();
+                    }
                 }
             }
             catch { }
