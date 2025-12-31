@@ -42,6 +42,7 @@ namespace Sona_Clipboard.Views
         private IntPtr _hWnd;
         private AppWindow? _appWindow;
         private PreviewWindow _previewWindow;
+        private ClipboardItem? _selectedPreviewItem;
 
         private int _currentPreviewIndex = 0;
         private DispatcherTimer _releaseCheckTimer;
@@ -107,13 +108,10 @@ namespace Sona_Clipboard.Views
         {
             if (_fullHistory.Count == 0) return;
 
-            bool wasVisible = _previewWindow.Visible;
-            if (!wasVisible)
+            if (!_previewWindow.Visible)
             {
                 _releaseCheckTimer.Start();
-                // If it's the first time we show it after a while, maybe we want to start at 0
-                // or restore from settings. Let's stick to 0 for a fresh start or current index if just hidden.
-                if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = 0;
+                _currentPreviewIndex = 0; // Always start from newest
             }
             else
             {
@@ -122,17 +120,17 @@ namespace Sona_Clipboard.Views
 
             _currentPreviewIndex = Math.Clamp(_currentPreviewIndex, 0, _fullHistory.Count - 1);
             
-            // Save last used position in settings for persistence across app restarts
             _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex;
             _settingsService.Save();
 
-            var item = _fullHistory[_currentPreviewIndex];
-            if (item.Type == "Image" && item.ImageBytes == null)
+            _selectedPreviewItem = _fullHistory[_currentPreviewIndex];
+            
+            if (_selectedPreviewItem.Type == "Image" && _selectedPreviewItem.ImageBytes == null)
             {
-                item.ImageBytes = await _databaseService.GetFullImageBytesAsync(item.Id);
+                _selectedPreviewItem.ImageBytes = await _databaseService.GetFullImageBytesAsync(_selectedPreviewItem.Id);
             }
 
-            _previewWindow.ShowItem(item, _currentPreviewIndex + 1);
+            _previewWindow.ShowItem(_selectedPreviewItem, _currentPreviewIndex + 1);
         }
 
         private void AddToHistory(ClipboardItem item)
@@ -245,17 +243,29 @@ namespace Sona_Clipboard.Views
 
         private void ReleaseCheckTimer_Tick(object? sender, object e)
         {
+            // Check if Alt, Ctrl or Shift are still pressed
             bool mods = (GetAsyncKeyState(0x11) & 0x8000) != 0 || (GetAsyncKeyState(0x10) & 0x8000) != 0 || (GetAsyncKeyState(0x12) & 0x8000) != 0;
+            
             if (!mods)
             {
                 _releaseCheckTimer.Stop();
-                if (_previewWindow.Visible && _fullHistory.Count > _currentPreviewIndex)
+                var itemToPaste = _selectedPreviewItem;
+                
+                if (_previewWindow.Visible && itemToPaste != null)
                 {
-                    var item = _fullHistory[_currentPreviewIndex];
                     Task.Run(async () => {
-                        if (item.Type == "Image" && item.ImageBytes == null) item.ImageBytes = await _databaseService.GetFullImageBytesAsync(item.Id);
-                        await _clipboardService.CopyToClipboard(item);
-                        this.DispatcherQueue.TryEnqueue(async () => { _previewWindow.Hide(); await _keyboardService.PasteSelectionAsync(); });
+                        if (itemToPaste.Type == "Image" && itemToPaste.ImageBytes == null)
+                        {
+                            itemToPaste.ImageBytes = await _databaseService.GetFullImageBytesAsync(itemToPaste.Id);
+                        }
+                        
+                        await _clipboardService.CopyToClipboard(itemToPaste);
+                        
+                        this.DispatcherQueue.TryEnqueue(async () => { 
+                            _previewWindow.Hide(); 
+                            await _keyboardService.PasteSelectionAsync(); 
+                            _selectedPreviewItem = null;
+                        });
                     });
                 }
             }
