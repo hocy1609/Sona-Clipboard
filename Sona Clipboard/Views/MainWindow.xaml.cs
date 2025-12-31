@@ -107,10 +107,13 @@ namespace Sona_Clipboard.Views
         {
             if (_fullHistory.Count == 0) return;
 
-            if (!_previewWindow.Visible)
+            bool wasVisible = _previewWindow.Visible;
+            if (!wasVisible)
             {
                 _releaseCheckTimer.Start();
-                _currentPreviewIndex = Math.Clamp(_settingsService.CurrentSettings.LastUsedIndex, 0, _fullHistory.Count - 1);
+                // If it's the first time we show it after a while, maybe we want to start at 0
+                // or restore from settings. Let's stick to 0 for a fresh start or current index if just hidden.
+                if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = 0;
             }
             else
             {
@@ -119,6 +122,7 @@ namespace Sona_Clipboard.Views
 
             _currentPreviewIndex = Math.Clamp(_currentPreviewIndex, 0, _fullHistory.Count - 1);
             
+            // Save last used position in settings for persistence across app restarts
             _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex;
             _settingsService.Save();
 
@@ -137,8 +141,15 @@ namespace Sona_Clipboard.Views
             {
                 await _databaseService.SaveItemAsync(item, item.ThumbnailBytes); 
                 await TrimHistoryAsync();
+                
+                // IMPORTANT: If we are currently browsing history in preview, 
+                // we shouldn't necessarily jump to 0 unless we want to show the newest item.
                 LoadHistoryFromDb(SearchBox.Text);
-                _currentPreviewIndex = 0;
+                
+                if (!_previewWindow.Visible)
+                {
+                    _currentPreviewIndex = 0;
+                }
             });
         }
 
