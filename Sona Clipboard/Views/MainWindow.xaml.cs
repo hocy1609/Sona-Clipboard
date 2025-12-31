@@ -108,10 +108,12 @@ namespace Sona_Clipboard.Views
         {
             if (_fullHistory.Count == 0) return;
 
-            if (!_previewWindow.Visible)
+            bool wasVisible = _previewWindow.Visible;
+            if (!wasVisible)
             {
                 _releaseCheckTimer.Start();
-                _currentPreviewIndex = 0; // Always start from newest
+                // RESTORE: Use last used index from settings
+                _currentPreviewIndex = Math.Clamp(_settingsService.CurrentSettings.LastUsedIndex, 0, _fullHistory.Count - 1);
             }
             else
             {
@@ -120,17 +122,20 @@ namespace Sona_Clipboard.Views
 
             _currentPreviewIndex = Math.Clamp(_currentPreviewIndex, 0, _fullHistory.Count - 1);
             
+            // Save position
             _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex;
             _settingsService.Save();
 
             _selectedPreviewItem = _fullHistory[_currentPreviewIndex];
             
-            if (_selectedPreviewItem.Type == "Image" && _selectedPreviewItem.ImageBytes == null)
+            if (_selectedPreviewItem != null)
             {
-                _selectedPreviewItem.ImageBytes = await _databaseService.GetFullImageBytesAsync(_selectedPreviewItem.Id);
+                if (_selectedPreviewItem.Type == "Image" && _selectedPreviewItem.ImageBytes == null)
+                {
+                    _selectedPreviewItem.ImageBytes = await _databaseService.GetFullImageBytesAsync(_selectedPreviewItem.Id);
+                }
+                _previewWindow.ShowItem(_selectedPreviewItem, _currentPreviewIndex + 1);
             }
-
-            _previewWindow.ShowItem(_selectedPreviewItem, _currentPreviewIndex + 1);
         }
 
         private void AddToHistory(ClipboardItem item)
@@ -140,11 +145,16 @@ namespace Sona_Clipboard.Views
                 await _databaseService.SaveItemAsync(item, item.ThumbnailBytes); 
                 await TrimHistoryAsync();
                 
-                // IMPORTANT: If we are currently browsing history in preview, 
-                // we shouldn't necessarily jump to 0 unless we want to show the newest item.
+                // If we are in preview, we need to adjust index because new item shifts everything
+                bool inPreview = _previewWindow.Visible;
+                
                 LoadHistoryFromDb(SearchBox.Text);
                 
-                if (!_previewWindow.Visible)
+                if (inPreview)
+                {
+                    _currentPreviewIndex++; // Shift index to keep same item selected
+                }
+                else
                 {
                     _currentPreviewIndex = 0;
                 }

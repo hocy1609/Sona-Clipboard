@@ -222,10 +222,13 @@ namespace Sona_Clipboard.Services
                     List<IStorageItem> storageItems = new List<IStorageItem>();
                     foreach (string path in paths)
                     {
-                        if (System.IO.File.Exists(path) || Directory.Exists(path))
+                        try 
                         {
-                            try { storageItems.Add(await StorageFile.GetFileFromPathAsync(path)); } catch { }
-                        }
+                            if (System.IO.File.Exists(path)) 
+                                storageItems.Add(await StorageFile.GetFileFromPathAsync(path));
+                            else if (System.IO.Directory.Exists(path))
+                                storageItems.Add(await StorageFolder.GetFolderFromPathAsync(path));
+                        } catch { }
                     }
                     if (storageItems.Count > 0) package.SetStorageItems(storageItems);
                 }
