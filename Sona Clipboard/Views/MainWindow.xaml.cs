@@ -46,15 +46,17 @@ namespace Sona_Clipboard.Views
 
         private int _currentPreviewIndex = 0;
         private DispatcherTimer _releaseCheckTimer;
+        private DispatcherTimer _searchDebounceTimer;
 
         public MainWindow()
         {
-            _settingsService = new SettingsService();
-            _databaseService = new DatabaseService();
-            _clipboardService = new ClipboardService();
-            _keyboardService = new KeyboardService();
-            _backupService = new BackupService();
-            
+            // Get services from DI container
+            _settingsService = App.Services.Get<SettingsService>();
+            _databaseService = App.Services.Get<DatabaseService>();
+            _clipboardService = App.Services.Get<ClipboardService>();
+            _keyboardService = App.Services.Get<KeyboardService>();
+            _backupService = App.Services.Get<BackupService>();
+
             _clipboardService.ClipboardChanged += (item) => AddToHistory(item);
 
             ShowWindowCommand = new RelayCommand((param) => _uiService.ShowWindow());
@@ -89,13 +91,19 @@ namespace Sona_Clipboard.Views
             _releaseCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
             _releaseCheckTimer.Tick += ReleaseCheckTimer_Tick;
 
+            _searchDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+            _searchDebounceTimer.Tick += (s, e) => { _searchDebounceTimer.Stop(); LoadHistoryFromDb(SearchBox.Text); };
+
             _settingsService.Load();
             _currentPreviewIndex = _settingsService.CurrentSettings.LastUsedIndex;
             LoadSettingsUI();
             SetupHotKeys();
             LoadHistoryFromDb();
 
-            Task.Run(async () => 
+            LogService.Info("Sona Clipboard started");
+            LogService.CleanOldLogs(7);
+
+            Task.Run(async () =>
             {
                 await Task.Delay(3000);
                 await _databaseService.ArchiveOldItemsAsync(30);
@@ -115,20 +123,20 @@ namespace Sona_Clipboard.Views
                 // Restore but also SHIFT if it's not the first time
                 _currentPreviewIndex = _settingsService.CurrentSettings.LastUsedIndex;
             }
-            
+
             // Move index immediately on every hotkey press
             if (goDeeper) _currentPreviewIndex++; else _currentPreviewIndex--;
 
             // Wrap around
             if (_currentPreviewIndex < 0) _currentPreviewIndex = _fullHistory.Count - 1;
             if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = 0;
-            
+
             // Persist the NEW index
             _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex;
             _settingsService.Save();
 
             _selectedPreviewItem = _fullHistory[_currentPreviewIndex];
-            
+
             if (_selectedPreviewItem != null)
             {
                 if (_selectedPreviewItem.Type == "Image" && _selectedPreviewItem.ImageBytes == null)
@@ -143,16 +151,16 @@ namespace Sona_Clipboard.Views
         {
             this.DispatcherQueue.TryEnqueue(async () =>
             {
-                await _databaseService.SaveItemAsync(item, item.ThumbnailBytes); 
+                await _databaseService.SaveItemAsync(item, item.ThumbnailBytes);
                 await TrimHistoryAsync();
-                
+
                 bool inPreview = _previewWindow.Visible;
                 LoadHistoryFromDb(SearchBox.Text);
-                
+
                 if (inPreview)
                 {
                     // Shift index to keep looking at same physical item
-                    _currentPreviewIndex++; 
+                    _currentPreviewIndex++;
                     if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = 0;
                 }
                 else
@@ -188,11 +196,14 @@ namespace Sona_Clipboard.Views
             var file = await savePicker.PickSaveFileAsync();
             if (file != null)
             {
-                try {
+                try
+                {
                     MaintenanceStatus.Text = "Бэкап...";
-                    await _backupService.CreateBackupAsync(_databaseService.DbPath, Path.GetDirectoryName(file.Path) ?? "", BackupPasswordBox.Text);
+                    await _backupService.CreateBackupAsync(_databaseService.DbPath, Path.GetDirectoryName(file.Path) ?? "", BackupPasswordBox.Password);
                     MaintenanceStatus.Text = "Успех!";
-                } catch (Exception ex) { MaintenanceStatus.Text = "Ошибка: " + ex.Message; }
+                    LogService.Info($"Backup created: {file.Path}");
+                }
+                catch (Exception ex) { MaintenanceStatus.Text = "Ошибка: " + ex.Message; LogService.Error("Backup failed", ex); }
             }
         }
 
@@ -204,11 +215,14 @@ namespace Sona_Clipboard.Views
             var file = await openPicker.PickSingleFileAsync();
             if (file != null)
             {
-                try {
-                    await _backupService.RestoreAsync(file.Path, _databaseService.DbPath, BackupPasswordBox.Text);
+                try
+                {
+                    await _backupService.RestoreAsync(file.Path, _databaseService.DbPath, BackupPasswordBox.Password);
                     LoadHistoryFromDb();
                     MaintenanceStatus.Text = "Восстановлено!";
-                } catch { MaintenanceStatus.Text = "Ошибка пароля!"; }
+                    LogService.Info("Backup restored successfully");
+                }
+                catch (Exception ex) { MaintenanceStatus.Text = "Ошибка пароля!"; LogService.Error("Restore failed", ex); }
             }
         }
 
@@ -221,17 +235,19 @@ namespace Sona_Clipboard.Views
 
         private void UpdateDbHealthUI()
         {
-            try {
+            try
+            {
                 var info = new FileInfo(_databaseService.DbPath);
                 DbHealthText.Text = $"Размер БД: {(double)info.Length / (1024 * 1024):F2} MB";
-            } catch { }
+            }
+            catch { }
         }
 
-        private async void SettingsButton_Click(object sender, RoutedEventArgs e) 
-        { 
-            HistoryView.Visibility = Visibility.Collapsed; 
-            SettingsView.Visibility = Visibility.Visible; 
-            DbPathText.Text = _databaseService.DbPath; 
+        private async void SettingsButton_Click(object sender, RoutedEventArgs e)
+        {
+            HistoryView.Visibility = Visibility.Collapsed;
+            SettingsView.Visibility = Visibility.Visible;
+            DbPathText.Text = _databaseService.DbPath;
             UpdateDbHealthUI();
             await RefreshAppStats();
         }
@@ -256,36 +272,41 @@ namespace Sona_Clipboard.Views
         {
             // Check if Alt, Ctrl or Shift are still pressed
             bool mods = (GetAsyncKeyState(0x11) & 0x8000) != 0 || (GetAsyncKeyState(0x10) & 0x8000) != 0 || (GetAsyncKeyState(0x12) & 0x8000) != 0;
-            
+
             if (!mods)
             {
                 _releaseCheckTimer.Stop(); // Stop ASAP to prevent re-entry
-                
+
                 var itemToPaste = _selectedPreviewItem;
                 if (_previewWindow.Visible && itemToPaste != null)
                 {
                     // 1. Data Prep in background
-                    Task.Run(async () => {
+                    Task.Run(async () =>
+                    {
                         if (itemToPaste.Type == "Image" && itemToPaste.ImageBytes == null)
                         {
                             itemToPaste.ImageBytes = await _databaseService.GetFullImageBytesAsync(itemToPaste.Id);
                         }
-                        
+
                         // 2. Clipboard & Paste on UI Thread
-                        this.DispatcherQueue.TryEnqueue(async () => { 
-                            try {
+                        this.DispatcherQueue.TryEnqueue(async () =>
+                        {
+                            try
+                            {
                                 await _clipboardService.CopyToClipboard(itemToPaste);
-                                
+
                                 // Hide window immediately so user sees responsiveness
-                                _previewWindow.Hide(); 
-                                
+                                _previewWindow.Hide();
+
                                 // Small sync delay for Windows OS
-                                await Task.Delay(100); 
-                                
+                                await Task.Delay(100);
+
                                 // Send Ctrl+V
-                                await _keyboardService.PasteSelectionAsync(); 
-                            } catch { }
-                            finally {
+                                await _keyboardService.PasteSelectionAsync();
+                            }
+                            catch { }
+                            finally
+                            {
                                 _selectedPreviewItem = null;
                             }
                         });
@@ -317,7 +338,7 @@ namespace Sona_Clipboard.Views
         private void RegisterHotKeysFromUI() { RegisterSingleKey(HotKeyService.ID_NEXT, HkNextCtrl, HkNextShift, HkNextAlt, HkNextKey); RegisterSingleKey(HotKeyService.ID_PREV, HkPrevCtrl, HkPrevShift, HkPrevAlt, HkPrevKey); }
         private void RegisterSingleKey(int id, CheckBox c, CheckBox s, CheckBox a, ComboBox k) { uint m = 0; if (c.IsChecked == true) m |= HotKeyHelper.MOD_CONTROL; if (s.IsChecked == true) m |= HotKeyHelper.MOD_SHIFT; if (a.IsChecked == true) m |= HotKeyHelper.MOD_ALT; if (m == 0) { _hotKeyService.Unregister(id); return; } _hotKeyService.Register(id, m, (uint)(0x41 + k.SelectedIndex)); }
         private void MainWindow_Closed(object sender, WindowEventArgs args) { args.Handled = true; this.Hide(); }
-        private void ExitApp_Internal() { this.Closed -= MainWindow_Closed; _previewWindow?.Close(); this.Close(); Environment.Exit(0); }
+        private void ExitApp_Internal() { this.Closed -= MainWindow_Closed; _hotKeyService?.Dispose(); _previewWindow?.Close(); this.Close(); Environment.Exit(0); }
         private void BackButton_Click(object sender, RoutedEventArgs e) { SettingsView.Visibility = Visibility.Collapsed; HistoryView.Visibility = Visibility.Visible; }
         private void OpenFolder_Click(object sender, RoutedEventArgs e) { try { System.Diagnostics.Process.Start("explorer.exe", AppDomain.CurrentDomain.BaseDirectory); } catch { } }
         private void ApplyHotKeys_Click(object sender, RoutedEventArgs e) { _hotKeyService.Unregister(HotKeyService.ID_NEXT); _hotKeyService.Unregister(HotKeyService.ID_PREV); RegisterHotKeysFromUI(); SaveSettingsFromUI(); }
@@ -326,11 +347,11 @@ namespace Sona_Clipboard.Views
         private async void DeleteButton_Click(object sender, RoutedEventArgs e) { if (sender is Button b && b.DataContext is ClipboardItem i) { await _databaseService.DeleteItemAsync(i.Id); _fullHistory.Remove(i); LoadHistoryFromDb(); } }
         private async void ClearHistory_Click(object sender, RoutedEventArgs e) { await _databaseService.ClearAllAsync(); LoadHistoryFromDb(); }
         private async void RemoveDuplicates_Click(object sender, RoutedEventArgs e) { await _databaseService.RemoveDuplicatesAsync(); LoadHistoryFromDb(); }
-        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => LoadHistoryFromDb(SearchBox.Text);
+        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) { _searchDebounceTimer.Stop(); _searchDebounceTimer.Start(); }
         private void ArchiveSearchCheck_Changed(object sender, RoutedEventArgs e) => LoadHistoryFromDb(SearchBox.Text);
         private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e) { if (sender is ToggleSwitch t) _settingsService.SetAutoStart(t.IsOn); }
         private async void ClipboardList_ItemClick(object sender, ItemClickEventArgs e) { if (e.ClickedItem is ClipboardItem i) { _currentPreviewIndex = _fullHistory.IndexOf(i); _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex; _settingsService.Save(); if (i.Type == "Image" && i.ImageBytes == null) i.ImageBytes = await _databaseService.GetFullImageBytesAsync(i.Id); await _clipboardService.CopyToClipboard(i); } }
-        
+
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
     }
 }

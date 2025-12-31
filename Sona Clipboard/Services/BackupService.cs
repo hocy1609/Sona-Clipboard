@@ -25,11 +25,11 @@ namespace Sona_Clipboard.Services
                 using (var sourceDb = new SqliteConnection($"Filename={dbPath}"))
                 {
                     await sourceDb.OpenAsync();
-                    
+
                     // 1. Generate SQL Dump in memory/temp file
                     // For simplicity and portability, we use a custom export or SQLite's Online Backup
                     // but for "Portable Format" (SQL Dump), we'll stream rows.
-                    
+
                     using (FileStream fs = new FileStream(backupPath, FileMode.Create))
                     using (BrotliStream bs = new BrotliStream(fs, CompressionLevel.Optimal))
                     {
@@ -75,11 +75,11 @@ namespace Sona_Clipboard.Services
                             for (int i = 0; i < reader.FieldCount; i++)
                             {
                                 if (reader.IsDBNull(i)) sb.Append("NULL");
-                                else if (reader.GetFieldType(i) == typeof(byte[])) 
+                                else if (reader.GetFieldType(i) == typeof(byte[]))
                                     sb.Append($"X'{BitConverter.ToString((byte[])reader[i]).Replace("-", "")}'");
-                                else 
+                                else
                                     sb.Append($"'{reader[i].ToString()?.Replace("'", "''")}'");
-                                
+
                                 if (i < reader.FieldCount - 1) sb.Append(",");
                             }
                             sb.Append(");");
@@ -126,7 +126,7 @@ namespace Sona_Clipboard.Services
                     using (var db = new SqliteConnection($"Filename={tempDb}"))
                     {
                         await db.OpenAsync();
-                        
+
                         Stream sourceStream = bs;
                         if (!string.IsNullOrEmpty(password))
                         {
@@ -141,7 +141,7 @@ namespace Sona_Clipboard.Services
                         }
                     }
                 }
-                
+
                 // Swap DBs
                 if (File.Exists(targetDbPath)) File.Delete(targetDbPath);
                 File.Move(tempDb, targetDbPath);
@@ -158,16 +158,16 @@ namespace Sona_Clipboard.Services
             byte[] salt = new byte[16];
             await source.ReadAsync(salt, 0, 16);
 
-            using (var pbkdf2 = new Rfc2898DeriveBytes(password, salt, Iterations, HashAlgorithmName.SHA256))
-            {
-                byte[] key = pbkdf2.GetBytes(32);
-                byte[] iv = pbkdf2.GetBytes(16);
+            var pbkdf2 = new Rfc2898DeriveBytes(password, salt, Iterations, HashAlgorithmName.SHA256);
+            byte[] key = pbkdf2.GetBytes(32);
+            byte[] iv = pbkdf2.GetBytes(16);
+            pbkdf2.Dispose();
 
-                Aes aes = Aes.Create();
-                aes.Key = key;
-                aes.IV = iv;
-                return new CryptoStream(source, aes.CreateDecryptor(), CryptoStreamMode.Read);
-            }
+            // Note: Aes и CryptoStream будут освобождены когда вызывающий код закроет возвращённый Stream
+            Aes aes = Aes.Create();
+            aes.Key = key;
+            aes.IV = iv;
+            return new CryptoStream(source, aes.CreateDecryptor(), CryptoStreamMode.Read, leaveOpen: false);
         }
     }
 }

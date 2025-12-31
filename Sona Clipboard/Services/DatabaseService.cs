@@ -39,10 +39,10 @@ namespace Sona_Clipboard.Services
 
                     // 2. Schema Creation
                     string tableCommand = "CREATE TABLE IF NOT EXISTS History (" +
-                                          "Id INTEGER PRIMARY KEY, " + 
+                                          "Id INTEGER PRIMARY KEY, " +
                                           "Type NVARCHAR(50), " +
-                                          "Content TEXT NULL, " + 
-                                          "ImageBytes BLOB NULL, " + 
+                                          "Content TEXT NULL, " +
+                                          "ImageBytes BLOB NULL, " +
                                           "Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, " +
                                           "ThumbnailBytes BLOB NULL, " +
                                           "IsPinned INTEGER DEFAULT 0, " +
@@ -61,15 +61,15 @@ namespace Sona_Clipboard.Services
                     new SqliteCommand("CREATE VIRTUAL TABLE IF NOT EXISTS History_FTS USING fts5(" +
                                       "Content, SourceAppName, Type, " +
                                       "content='History', content_rowid='Id');", db).ExecuteNonQuery();
-                    
+
                     // Triggers to keep FTS in sync
                     string[] triggers = {
                         "CREATE TRIGGER IF NOT EXISTS History_ai AFTER INSERT ON History BEGIN " +
                         "INSERT INTO History_FTS(rowid, Content, SourceAppName, Type) VALUES (new.Id, new.Content, new.SourceAppName, new.Type); END;",
-                        
+
                         "CREATE TRIGGER IF NOT EXISTS History_ad AFTER DELETE ON History BEGIN " +
                         "INSERT INTO History_FTS(History_FTS, rowid, Content, SourceAppName, Type) VALUES('delete', old.Id, old.Content, old.SourceAppName, old.Type); END;",
-                        
+
                         "CREATE TRIGGER IF NOT EXISTS History_au AFTER UPDATE ON History BEGIN " +
                         "INSERT INTO History_FTS(History_FTS, rowid, Content, SourceAppName, Type) VALUES('delete', old.Id, old.Content, old.SourceAppName, old.Type); " +
                         "INSERT INTO History_FTS(rowid, Content, SourceAppName, Type) VALUES (new.Id, new.Content, new.SourceAppName, new.Type); END;"
@@ -80,7 +80,7 @@ namespace Sona_Clipboard.Services
                     try { new SqliteCommand("ALTER TABLE History ADD COLUMN SourceAppName TEXT NULL", db).ExecuteNonQuery(); } catch { }
                     try { new SqliteCommand("ALTER TABLE History ADD COLUMN SourceProcessName TEXT NULL", db).ExecuteNonQuery(); } catch { }
                     try { new SqliteCommand("ALTER TABLE History ADD COLUMN ContentHash TEXT NULL", db).ExecuteNonQuery(); } catch { }
-                    
+
                     // Periodic Maintenance
                     if (new Random().Next(0, 100) < 5) // 5% chance on startup
                     {
@@ -90,7 +90,7 @@ namespace Sona_Clipboard.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"DB Init Error: {ex.Message}");
+                LogService.Error("DB Init Error", ex);
             }
         }
 
@@ -99,7 +99,7 @@ namespace Sona_Clipboard.Services
             try
             {
                 string hash = CalculateHash(item);
-                
+
                 using (var db = new SqliteConnection($"Filename={_dbPath}"))
                 {
                     await db.OpenAsync();
@@ -110,7 +110,7 @@ namespace Sona_Clipboard.Services
                         var checkCmd = new SqliteCommand("SELECT Id FROM History WHERE ContentHash = @Hash LIMIT 1", db);
                         checkCmd.Parameters.AddWithValue("@Hash", hash);
                         var existingId = await checkCmd.ExecuteScalarAsync();
-                        
+
                         if (existingId != null)
                         {
                             // Update timestamp of existing item instead of inserting duplicate
@@ -133,13 +133,13 @@ namespace Sona_Clipboard.Services
                     insertCommand.Parameters.AddWithValue("@Hash", (object?)hash ?? DBNull.Value);
                     insertCommand.Parameters.AddWithValue("@SApp", (object?)item.SourceAppName ?? DBNull.Value);
                     insertCommand.Parameters.AddWithValue("@SProc", (object?)item.SourceProcessName ?? DBNull.Value);
-                    
+
                     await insertCommand.ExecuteNonQueryAsync();
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"DB Save Error: {ex.Message}");
+                LogService.Error("DB Save Error", ex);
             }
         }
 
@@ -161,7 +161,7 @@ namespace Sona_Clipboard.Services
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { LogService.Error("GetAppUsageStats Error", ex); }
             return stats;
         }
 
@@ -177,7 +177,7 @@ namespace Sona_Clipboard.Services
                     await cmd.ExecuteNonQueryAsync();
                 }
             }
-            catch { }
+            catch (Exception ex) { LogService.Error("DeleteBySource Error", ex); }
         }
 
         private string CalculateHash(ClipboardItem item)
@@ -215,18 +215,18 @@ namespace Sona_Clipboard.Services
                 using (var db = new SqliteConnection($"Filename={_dbPath}"))
                 {
                     await db.OpenAsync();
-                    
+
                     // Register REGEXP function for advanced users
-                    db.CreateFunction("REGEXP", (string pattern, string input) => 
+                    db.CreateFunction("REGEXP", (string pattern, string input) =>
                         System.Text.RegularExpressions.Regex.IsMatch(input ?? "", pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase));
 
                     string ftsQuery = ParseAdvancedQuery(searchQuery);
-                    
+
                     string sql;
                     if (includeArchive && File.Exists(archivePath))
                     {
                         await new SqliteCommand($"ATTACH DATABASE '{archivePath}' AS Arc", db).ExecuteNonQueryAsync();
-                        
+
                         sql = $@"SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.RtfContent, h.HtmlContent, h.SourceAppName 
                                  FROM History h
                                  JOIN History_FTS f ON f.rowid = h.Id
@@ -276,7 +276,7 @@ namespace Sona_Clipboard.Services
                             if (!await query.IsDBNullAsync(2)) item.Content = query.GetString(2);
                             if (!await query.IsDBNullAsync(6)) item.RtfContent = query.GetString(6);
                             if (!await query.IsDBNullAsync(7)) item.HtmlContent = query.GetString(7);
-                            
+
                             if (!await query.IsDBNullAsync(5))
                             {
                                 byte[] thumb = (byte[])query["ThumbnailBytes"];
@@ -294,7 +294,7 @@ namespace Sona_Clipboard.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"DB Load Error: {ex.Message}");
+                LogService.Error("DB Load Error", ex);
             }
             finally
             {
@@ -317,11 +317,16 @@ namespace Sona_Clipboard.Services
 
             foreach (var part in parts)
             {
-                if (part.StartsWith("app:")) ftsParts.Add($"SourceAppName:{part.Substring(4)}*");
-                else if (part.StartsWith("type:")) ftsParts.Add($"Type:{part.Substring(5)}*");
-                else if (part.StartsWith("regex:")) sqlFilters.Add($"h.Content REGEXP '{part.Substring(6)}'");
-                else if (part.StartsWith("ext:")) ftsParts.Add($"Content:*{part.Substring(4)}*");
-                else ftsParts.Add($"{part}*");
+                if (part.StartsWith("app:")) ftsParts.Add($"SourceAppName:{SanitizeFtsInput(part.Substring(4))}*");
+                else if (part.StartsWith("type:")) ftsParts.Add($"Type:{SanitizeFtsInput(part.Substring(5))}*");
+                else if (part.StartsWith("regex:"))
+                {
+                    // Для regex используем параметризованный подход через LIKE вместо REGEXP для безопасности
+                    string sanitized = SanitizeSqlInput(part.Substring(6));
+                    sqlFilters.Add($"h.Content LIKE '%{sanitized}%'");
+                }
+                else if (part.StartsWith("ext:")) ftsParts.Add($"Content:*{SanitizeFtsInput(part.Substring(4))}*");
+                else ftsParts.Add($"{SanitizeFtsInput(part)}*");
             }
 
             string result = "";
@@ -340,6 +345,18 @@ namespace Sona_Clipboard.Services
             return string.IsNullOrEmpty(result) ? "1=1" : result;
         }
 
+        private static string SanitizeFtsInput(string input)
+        {
+            // Экранируем специальные символы FTS5
+            return input.Replace("'", "''").Replace("\"", "").Replace("*", "").Replace(":", "");
+        }
+
+        private static string SanitizeSqlInput(string input)
+        {
+            // Экранируем SQL injection символы
+            return input.Replace("'", "''").Replace(";", "").Replace("--", "").Replace("/*", "").Replace("*/", "");
+        }
+
         public async Task PerformMaintenanceAsync()
         {
             try
@@ -351,7 +368,7 @@ namespace Sona_Clipboard.Services
                     await new SqliteCommand("PRAGMA optimize;", db).ExecuteNonQueryAsync();
                     await new SqliteCommand("PRAGMA incremental_vacuum;", db).ExecuteNonQueryAsync();
                 }
-                
+
                 // 1-Hour RPO Backup
                 await BackupDatabaseAsync();
             }
@@ -382,7 +399,7 @@ namespace Sona_Clipboard.Services
                 using (var db = new SqliteConnection($"Filename={_dbPath}"))
                 {
                     await db.OpenAsync();
-                    
+
                     // ATTACH archive database (Sharding strategy)
                     var attachCmd = new SqliteCommand($"ATTACH DATABASE '{archivePath}' AS Archive", db);
                     await attachCmd.ExecuteNonQueryAsync();
@@ -396,7 +413,7 @@ namespace Sona_Clipboard.Services
                         "WHERE IsPinned = 0 AND datetime(Timestamp) < datetime('now', @days); " +
                         "DELETE FROM History WHERE IsPinned = 0 AND datetime(Timestamp) < datetime('now', @days);", db);
                     moveCmd.Parameters.AddWithValue("@days", $"-{daysToKeep} days");
-                    
+
                     await moveCmd.ExecuteNonQueryAsync();
                     await new SqliteCommand("DETACH DATABASE Archive", db).ExecuteNonQueryAsync();
                 }
@@ -415,7 +432,7 @@ namespace Sona_Clipboard.Services
                 using (var db = new SqliteConnection($"Filename={_dbPath}"))
                 {
                     await db.OpenAsync();
-                    
+
                     // Try Main DB first
                     var cmd = new SqliteCommand("SELECT ImageBytes FROM History WHERE Id = @Id", db);
                     cmd.Parameters.AddWithValue("@Id", id);

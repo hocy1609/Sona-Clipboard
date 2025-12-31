@@ -226,7 +226,7 @@
                                 <TextBlock Text="Резервное копирование" FontWeight="Bold"/>
                                 <TextBlock x:Name="DbHealthText" Text="Размер БД: 0 MB" Opacity="0.7" FontSize="12"/>
                                 
-                                <TextBox x:Name="BackupPasswordBox" PlaceholderText="Пароль для шифрования (опционально)" 
+                                <PasswordBox x:Name="BackupPasswordBox" PlaceholderText="Пароль для шифрования (опционально)" 
                                          Header="Защита бэкапа" FontSize="12"/>
                                 
                                 <Grid ColumnSpacing="10">

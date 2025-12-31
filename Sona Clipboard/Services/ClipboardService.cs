@@ -23,7 +23,7 @@ namespace Sona_Clipboard.Services
         [DllImport("user32.dll")]
         static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-        private bool _isCopiedByMe = false;
+        private volatile bool _isCopiedByMe = false;
         public event Action<ClipboardItem>? ClipboardChanged;
 
         public ClipboardService()
@@ -40,15 +40,15 @@ namespace Sona_Clipboard.Services
 
                 uint processId;
                 GetWindowThreadProcessId(hWnd, out processId);
-                
+
                 using (var process = Process.GetProcessById((int)processId))
                 {
                     string processName = process.ProcessName;
                     // Try to get a more friendly name (Main window title)
-                    string appName = string.IsNullOrWhiteSpace(process.MainWindowTitle) 
-                        ? processName 
+                    string appName = string.IsNullOrWhiteSpace(process.MainWindowTitle)
+                        ? processName
                         : process.MainWindowTitle;
-                    
+
                     // Cleanup title (usually apps have 'Title - AppName' or just 'AppName')
                     if (appName.Contains(" - "))
                         appName = appName.Split(" - ").Last();
@@ -67,10 +67,10 @@ namespace Sona_Clipboard.Services
 
             DataPackageView? view = null;
             // Retry with exponential backoff
-            for (int i = 0; i < 5; i++) 
-            { 
-                try { view = Clipboard.GetContent(); break; } 
-                catch { await Task.Delay(10 * (int)Math.Pow(2, i)); } 
+            for (int i = 0; i < 5; i++)
+            {
+                try { view = Clipboard.GetContent(); break; }
+                catch { await Task.Delay(10 * (int)Math.Pow(2, i)); }
             }
             if (view == null) return;
 
@@ -79,20 +79,20 @@ namespace Sona_Clipboard.Services
                 if (view.Contains(StandardDataFormats.Text))
                 {
                     string text = await view.GetTextAsync();
-                    if (string.IsNullOrWhiteSpace(text)) 
+                    if (string.IsNullOrWhiteSpace(text))
                     {
                         // Check if it's maybe an image/file before giving up
                         if (!view.Contains(StandardDataFormats.Bitmap) && !view.Contains(StandardDataFormats.StorageItems))
-                            return; 
+                            return;
                     }
 
                     string? rtf = view.Contains(StandardDataFormats.Rtf) ? await view.GetRtfAsync() : null;
                     string? html = view.Contains(StandardDataFormats.Html) ? await view.GetHtmlFormatAsync() : null;
 
-                    ClipboardChanged?.Invoke(new ClipboardItem 
-                    { 
-                        Type = "Text", 
-                        Content = text, 
+                    ClipboardChanged?.Invoke(new ClipboardItem
+                    {
+                        Type = "Text",
+                        Content = text,
                         RtfContent = rtf,
                         HtmlContent = html,
                         Timestamp = DateTime.Now.ToString("HH:mm"),
@@ -109,32 +109,35 @@ namespace Sona_Clipboard.Services
                     long totalSize = 0;
                     string extensions = "";
 
-                    foreach (var item in storageItems) 
+                    foreach (var item in storageItems)
                     {
-                        if (!string.IsNullOrEmpty(item.Path)) 
+                        if (!string.IsNullOrEmpty(item.Path))
                         {
                             paths.Add(item.Path);
-                            try {
+                            try
+                            {
                                 var info = new FileInfo(item.Path);
-                                if (info.Exists) {
+                                if (info.Exists)
+                                {
                                     totalSize += info.Length;
                                     extensions += info.Extension.ToLower() + " ";
                                 }
-                            } catch {}
+                            }
+                            catch { }
                         }
                     }
                     if (paths.Count == 0) return;
 
                     string content = string.Join(Environment.NewLine, paths);
-                    ClipboardChanged?.Invoke(new ClipboardItem 
-                    { 
-                        Type = "File", 
-                        Content = content, 
+                    ClipboardChanged?.Invoke(new ClipboardItem
+                    {
+                        Type = "File",
+                        Content = content,
                         Timestamp = DateTime.Now.ToString("HH:mm"),
                         SourceAppName = appName,
                         SourceProcessName = processName,
                         // Store metadata in a way FTS can index it
-                        RtfContent = $"Size:{totalSize} Ext:{extensions.Trim()}" 
+                        RtfContent = $"Size:{totalSize} Ext:{extensions.Trim()}"
                     });
                 }
                 else if (view.Contains(StandardDataFormats.Bitmap))
@@ -159,14 +162,14 @@ namespace Sona_Clipboard.Services
                             SourceAppName = appName,
                             SourceProcessName = processName
                         };
-                        
+
                         ClipboardChanged?.Invoke(item);
                     }
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Clipboard error: {ex.Message}");
+                LogService.Error("Clipboard error", ex);
             }
         }
 
@@ -229,13 +232,14 @@ namespace Sona_Clipboard.Services
                     List<IStorageItem> storageItems = new List<IStorageItem>();
                     foreach (string path in paths)
                     {
-                        try 
+                        try
                         {
-                            if (System.IO.File.Exists(path)) 
+                            if (System.IO.File.Exists(path))
                                 storageItems.Add(await StorageFile.GetFileFromPathAsync(path));
                             else if (System.IO.Directory.Exists(path))
                                 storageItems.Add(await StorageFolder.GetFolderFromPathAsync(path));
-                        } catch { } 
+                        }
+                        catch { }
                     }
                     if (storageItems.Count > 0) package.SetStorageItems(storageItems);
                 }
@@ -245,7 +249,7 @@ namespace Sona_Clipboard.Services
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Copy error: {ex.Message}");
+                LogService.Error("Copy error", ex);
             }
         }
 
@@ -256,9 +260,9 @@ namespace Sona_Clipboard.Services
             {
                 using (InMemoryRandomAccessStream stream = new InMemoryRandomAccessStream())
                 {
-                    await stream.WriteAsync(bytes.AsBuffer()); 
+                    await stream.WriteAsync(bytes.AsBuffer());
                     stream.Seek(0);
-                    BitmapImage image = new BitmapImage(); 
+                    BitmapImage image = new BitmapImage();
                     await image.SetSourceAsync(stream);
                     return image;
                 }

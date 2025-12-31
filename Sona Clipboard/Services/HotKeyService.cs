@@ -5,10 +5,11 @@ using WinRT.Interop;
 
 namespace Sona_Clipboard.Services
 {
-    public class HotKeyService
+    public class HotKeyService : IDisposable
     {
         private readonly IntPtr _hWnd;
         private SubclassProc _subclassDelegate;
+        private bool _disposed = false;
 
         private const int WM_HOTKEY = 0x0312;
         public const int ID_NEXT = 9001;
@@ -45,8 +46,21 @@ namespace Sona_Clipboard.Services
             return DefSubclassProc(hWnd, uMsg, wParam, lParam);
         }
 
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            
+            Unregister(ID_NEXT);
+            Unregister(ID_PREV);
+            RemoveWindowSubclass(_hWnd, _subclassDelegate, 0);
+        }
+
         [DllImport("comctl32.dll", SetLastError = true)]
         private static extern bool SetWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass, uint uIdSubclass, IntPtr dwRefData);
+
+        [DllImport("comctl32.dll", SetLastError = true)]
+        private static extern bool RemoveWindowSubclass(IntPtr hWnd, SubclassProc pfnSubclass, uint uIdSubclass);
 
         [DllImport("comctl32.dll", SetLastError = true)]
         private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
