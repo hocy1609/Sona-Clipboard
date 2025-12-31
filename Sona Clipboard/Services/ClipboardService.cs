@@ -79,6 +79,13 @@ namespace Sona_Clipboard.Services
                 if (view.Contains(StandardDataFormats.Text))
                 {
                     string text = await view.GetTextAsync();
+                    if (string.IsNullOrWhiteSpace(text)) 
+                    {
+                        // Check if it's maybe an image/file before giving up
+                        if (!view.Contains(StandardDataFormats.Bitmap) && !view.Contains(StandardDataFormats.StorageItems))
+                            return; 
+                    }
+
                     string? rtf = view.Contains(StandardDataFormats.Rtf) ? await view.GetRtfAsync() : null;
                     string? html = view.Contains(StandardDataFormats.Html) ? await view.GetHtmlFormatAsync() : null;
 
@@ -228,13 +235,13 @@ namespace Sona_Clipboard.Services
                                 storageItems.Add(await StorageFile.GetFileFromPathAsync(path));
                             else if (System.IO.Directory.Exists(path))
                                 storageItems.Add(await StorageFolder.GetFolderFromPathAsync(path));
-                        } catch { }
+                        } catch { } 
                     }
                     if (storageItems.Count > 0) package.SetStorageItems(storageItems);
                 }
 
                 Clipboard.SetContent(package);
-                if (item.Type == "Text") await Task.Delay(50); else await Task.Delay(200);
+                Clipboard.Flush(); // Ensure data persists
             }
             catch (Exception ex)
             {

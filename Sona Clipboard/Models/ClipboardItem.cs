@@ -24,16 +24,13 @@ namespace Sona_Clipboard.Models
         {
             get
             {
+                if (Type == "Image") return "[Изображение]";
                 if (Type == "File" && !string.IsNullOrEmpty(Content))
                 {
-                    // Считаем количество строк (путей к файлам)
                     int count = Content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
-                    if (count > 1)
-                        return $"📂 Скопировано файлов: {count}";
-                    else
-                        return Content; // Если файл один, показываем путь
+                    return count > 1 ? $"📂 Файлов: {count}" : Content;
                 }
-                return Content ?? "";
+                return string.IsNullOrWhiteSpace(Content) ? "[Пустой клип]" : Content;
             }
         }
     }

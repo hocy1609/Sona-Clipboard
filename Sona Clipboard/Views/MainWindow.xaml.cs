@@ -90,6 +90,7 @@ namespace Sona_Clipboard.Views
             _releaseCheckTimer.Tick += ReleaseCheckTimer_Tick;
 
             _settingsService.Load();
+            _currentPreviewIndex = _settingsService.CurrentSettings.LastUsedIndex;
             LoadSettingsUI();
             SetupHotKeys();
             LoadHistoryFromDb();
@@ -108,21 +109,21 @@ namespace Sona_Clipboard.Views
         {
             if (_fullHistory.Count == 0) return;
 
-            bool wasVisible = _previewWindow.Visible;
-            if (!wasVisible)
+            if (!_previewWindow.Visible)
             {
                 _releaseCheckTimer.Start();
-                // RESTORE: Use last used index from settings
-                _currentPreviewIndex = Math.Clamp(_settingsService.CurrentSettings.LastUsedIndex, 0, _fullHistory.Count - 1);
+                // Restore but also SHIFT if it's not the first time
+                _currentPreviewIndex = _settingsService.CurrentSettings.LastUsedIndex;
             }
-            else
-            {
-                if (goDeeper) _currentPreviewIndex++; else _currentPreviewIndex--;
-            }
-
-            _currentPreviewIndex = Math.Clamp(_currentPreviewIndex, 0, _fullHistory.Count - 1);
             
-            // Save position
+            // Move index immediately on every hotkey press
+            if (goDeeper) _currentPreviewIndex++; else _currentPreviewIndex--;
+
+            // Wrap around
+            if (_currentPreviewIndex < 0) _currentPreviewIndex = _fullHistory.Count - 1;
+            if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = 0;
+            
+            // Persist the NEW index
             _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex;
             _settingsService.Save();
 
@@ -145,18 +146,18 @@ namespace Sona_Clipboard.Views
                 await _databaseService.SaveItemAsync(item, item.ThumbnailBytes); 
                 await TrimHistoryAsync();
                 
-                // If we are in preview, we need to adjust index because new item shifts everything
                 bool inPreview = _previewWindow.Visible;
-                
                 LoadHistoryFromDb(SearchBox.Text);
                 
                 if (inPreview)
                 {
-                    _currentPreviewIndex++; // Shift index to keep same item selected
+                    // Shift index to keep looking at same physical item
+                    _currentPreviewIndex++; 
+                    if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = 0;
                 }
                 else
                 {
-                    _currentPreviewIndex = 0;
+                    _currentPreviewIndex = 0; // Newest is 0
                 }
             });
         }
@@ -169,7 +170,7 @@ namespace Sona_Clipboard.Views
 
         private async void LoadHistoryFromDb(string? query = null)
         {
-            bool searchArchive = ArchiveSearchCheck?.IsChecked ?? false;
+            bool searchArchive = (ArchiveSearchCheck != null) && (ArchiveSearchCheck.IsChecked == true);
             _fullHistory = await _databaseService.LoadHistoryAsync(query, searchArchive);
             ClipboardList.Items.Clear();
             foreach (var item in _fullHistory) ClipboardList.Items.Add(item);
@@ -189,7 +190,7 @@ namespace Sona_Clipboard.Views
             {
                 try {
                     MaintenanceStatus.Text = "Бэкап...";
-                    await _backupService.CreateBackupAsync(_databaseService.DbPath, Path.GetDirectoryName(file.Path), BackupPasswordBox.Text);
+                    await _backupService.CreateBackupAsync(_databaseService.DbPath, Path.GetDirectoryName(file.Path) ?? "", BackupPasswordBox.Text);
                     MaintenanceStatus.Text = "Успех!";
                 } catch (Exception ex) { MaintenanceStatus.Text = "Ошибка: " + ex.Message; }
             }
@@ -258,23 +259,35 @@ namespace Sona_Clipboard.Views
             
             if (!mods)
             {
-                _releaseCheckTimer.Stop();
-                var itemToPaste = _selectedPreviewItem;
+                _releaseCheckTimer.Stop(); // Stop ASAP to prevent re-entry
                 
+                var itemToPaste = _selectedPreviewItem;
                 if (_previewWindow.Visible && itemToPaste != null)
                 {
+                    // 1. Data Prep in background
                     Task.Run(async () => {
                         if (itemToPaste.Type == "Image" && itemToPaste.ImageBytes == null)
                         {
                             itemToPaste.ImageBytes = await _databaseService.GetFullImageBytesAsync(itemToPaste.Id);
                         }
                         
-                        await _clipboardService.CopyToClipboard(itemToPaste);
-                        
+                        // 2. Clipboard & Paste on UI Thread
                         this.DispatcherQueue.TryEnqueue(async () => { 
-                            _previewWindow.Hide(); 
-                            await _keyboardService.PasteSelectionAsync(); 
-                            _selectedPreviewItem = null;
+                            try {
+                                await _clipboardService.CopyToClipboard(itemToPaste);
+                                
+                                // Hide window immediately so user sees responsiveness
+                                _previewWindow.Hide(); 
+                                
+                                // Small sync delay for Windows OS
+                                await Task.Delay(100); 
+                                
+                                // Send Ctrl+V
+                                await _keyboardService.PasteSelectionAsync(); 
+                            } catch { }
+                            finally {
+                                _selectedPreviewItem = null;
+                            }
                         });
                     });
                 }
