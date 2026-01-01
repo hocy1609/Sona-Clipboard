@@ -47,6 +47,7 @@ namespace Sona_Clipboard.Views
         private ClipboardItem? _selectedPreviewItem;
 
         private int _currentPreviewIndex = 0;
+        private DateTime _lastPasteAt = DateTime.MinValue;
         private DispatcherTimer _releaseCheckTimer;
         private DispatcherTimer _searchDebounceTimer;
 
@@ -123,21 +124,29 @@ namespace Sona_Clipboard.Views
         {
             if (_fullHistory.Count == 0) return;
 
+            bool shouldResetIndex = (DateTime.UtcNow - _lastPasteAt) > TimeSpan.FromSeconds(3);
+            if (shouldResetIndex)
+            {
+                _currentPreviewIndex = 0;
+                _settingsService.CurrentSettings.LastUsedIndex = 0;
+            }
+
             if (!_previewWindow.Visible)
             {
                 _releaseCheckTimer.Start();
                 // Restore but also SHIFT if it's not the first time
-                _currentPreviewIndex = _settingsService.CurrentSettings.LastUsedIndex;
+                if (!shouldResetIndex)
+                {
+                    _currentPreviewIndex = _settingsService.CurrentSettings.LastUsedIndex;
+                }
             }
 
             // Move index immediately on every hotkey press
             if (goDeeper) _currentPreviewIndex++; else _currentPreviewIndex--;
 
-            // Wrap around
-            if (_currentPreviewIndex < 0) _currentPreviewIndex = _fullHistory.Count - 1;
-            if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = 0;
+            if (_currentPreviewIndex < 0) _currentPreviewIndex = 0;
+            if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = _fullHistory.Count - 1;
 
-            // Persist the NEW index
             _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex;
             _settingsService.Save();
 
@@ -306,6 +315,7 @@ namespace Sona_Clipboard.Views
 
                                 // Send Ctrl+V
                                 await _keyboardService.PasteSelectionAsync();
+                                _lastPasteAt = DateTime.UtcNow;
                             }
                             catch { }
                             finally
