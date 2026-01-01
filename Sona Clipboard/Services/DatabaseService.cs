@@ -206,6 +206,10 @@ namespace Sona_Clipboard.Services
 
         public async Task<List<ClipboardItem>> LoadHistoryAsync(string? searchQuery = null, bool includeArchive = false)
         {
+            // Performance Optimization:
+            // We consciously exclude 'RtfContent' and 'HtmlContent' from this initial fetch.
+            // These fields can be very large (megabytes) and are not needed for the list view.
+            // They are lazy-loaded only when the user copies/previews an item (see GetFullTextContentAsync).
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
             var history = new List<ClipboardItem>();
             string archivePath = Path.Combine(Path.GetDirectoryName(_dbPath)!, "SonaArchive.db");
@@ -227,12 +231,12 @@ namespace Sona_Clipboard.Services
                     {
                         await new SqliteCommand($"ATTACH DATABASE '{archivePath}' AS Arc", db).ExecuteNonQueryAsync();
 
-                        sql = $@"SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.RtfContent, h.HtmlContent, h.SourceAppName 
+                        sql = $@"SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.SourceAppName
                                  FROM History h
                                  JOIN History_FTS f ON f.rowid = h.Id
                                  WHERE {ftsQuery}
                                  UNION ALL
-                                 SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.RtfContent, h.HtmlContent, h.SourceAppName 
+                                 SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.SourceAppName
                                  FROM Arc.History h
                                  -- Note: Archive FTS would need separate virtual table, but we'll use LIKE for archive for simplicity or simple FTS if created
                                  WHERE h.Content LIKE @likeQuery
@@ -242,11 +246,11 @@ namespace Sona_Clipboard.Services
                     {
                         if (string.IsNullOrWhiteSpace(searchQuery))
                         {
-                            sql = "SELECT Id, Type, Content, Timestamp, IsPinned, ThumbnailBytes, RtfContent, HtmlContent, SourceAppName FROM History ORDER BY IsPinned DESC, Id DESC LIMIT 100";
+                            sql = "SELECT Id, Type, Content, Timestamp, IsPinned, ThumbnailBytes, SourceAppName FROM History ORDER BY IsPinned DESC, Id DESC LIMIT 100";
                         }
                         else
                         {
-                            sql = $@"SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.RtfContent, h.HtmlContent, h.SourceAppName 
+                            sql = $@"SELECT h.Id, h.Type, h.Content, h.Timestamp, h.IsPinned, h.ThumbnailBytes, h.SourceAppName
                                      FROM History h
                                      JOIN History_FTS f ON f.rowid = h.Id
                                      WHERE {ftsQuery}
@@ -271,11 +275,9 @@ namespace Sona_Clipboard.Services
                                 Type = query.GetString(1),
                                 Timestamp = query.GetString(3),
                                 IsPinned = query.GetInt32(4) == 1,
-                                SourceAppName = query.IsDBNull(8) ? null : query.GetString(8)
+                                SourceAppName = query.IsDBNull(6) ? null : query.GetString(6)
                             };
                             if (!await query.IsDBNullAsync(2)) item.Content = query.GetString(2);
-                            if (!await query.IsDBNullAsync(6)) item.RtfContent = query.GetString(6);
-                            if (!await query.IsDBNullAsync(7)) item.HtmlContent = query.GetString(7);
 
                             if (!await query.IsDBNullAsync(5))
                             {
@@ -299,10 +301,8 @@ namespace Sona_Clipboard.Services
             finally
             {
                 stopwatch.Stop();
-                if (stopwatch.ElapsedMilliseconds > 100)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[PERF WARNING] MegaSearch took {stopwatch.ElapsedMilliseconds}ms");
-                }
+                // Measure impact: Log time and count
+                System.Diagnostics.Debug.WriteLine($"[PERF] LoadHistoryAsync: Loaded {history.Count} items in {stopwatch.ElapsedMilliseconds}ms (Lazy loaded RTF/HTML skipped)");
             }
             return history;
         }
@@ -453,6 +453,59 @@ namespace Sona_Clipboard.Services
             }
             catch { return null; }
             return null;
+        }
+
+        public async Task<(string? Rtf, string? Html)> GetFullTextContentAsync(int id)
+        {
+            string archivePath = Path.Combine(Path.GetDirectoryName(_dbPath)!, "SonaArchive.db");
+            try
+            {
+                using (var db = new SqliteConnection($"Filename={_dbPath}"))
+                {
+                    await db.OpenAsync();
+
+                    // Try Main DB first
+                    var cmd = new SqliteCommand("SELECT RtfContent, HtmlContent FROM History WHERE Id = @Id", db);
+                    cmd.Parameters.AddWithValue("@Id", id);
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        if (await reader.ReadAsync())
+                        {
+                            string? rtf = reader.IsDBNull(0) ? null : reader.GetString(0);
+                            string? html = reader.IsDBNull(1) ? null : reader.GetString(1);
+                            // Found in main DB, return result (even if nulls) to avoid checking archive
+                            return (rtf, html);
+                        }
+                    }
+
+                    // Try Archive DB
+                    if (File.Exists(archivePath))
+                    {
+                        await new SqliteCommand($"ATTACH DATABASE '{archivePath}' AS Arc", db).ExecuteNonQueryAsync();
+                        var arcCmd = new SqliteCommand("SELECT RtfContent, HtmlContent FROM Arc.History WHERE Id = @Id", db);
+                        arcCmd.Parameters.AddWithValue("@Id", id);
+
+                        string? rtf = null, html = null;
+                        using (var reader = await arcCmd.ExecuteReaderAsync())
+                        {
+                            if (await reader.ReadAsync())
+                            {
+                                rtf = reader.IsDBNull(0) ? null : reader.GetString(0);
+                                html = reader.IsDBNull(1) ? null : reader.GetString(1);
+                            }
+                        }
+
+                        await new SqliteCommand("DETACH DATABASE Arc", db).ExecuteNonQueryAsync();
+                        return (rtf, html);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogService.Error("GetFullTextContentAsync Error", ex);
+            }
+            return (null, null);
         }
 
         public async Task TogglePinAsync(int id, bool isPinned)
