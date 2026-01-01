@@ -448,11 +448,24 @@ namespace Sona_Clipboard.Views
         {
             if (sender is ToolTip toolTip && toolTip.DataContext is ClipboardItem item)
             {
-                await EnsureRichContentAsync(item);
-
-                if (toolTip.Content is Image image && item.ImageBytes != null)
+                if (toolTip.Content is Image image)
                 {
-                    image.Source = await CreateBitmapImageAsync(item.ImageBytes);
+                    // 1. Reset/Set default immediately to avoid stale image from virtualization
+                    image.Source = item.Thumbnail;
+
+                    // 2. Load heavy content
+                    await EnsureRichContentAsync(item);
+
+                    // 3. Update to high-res if available
+                    if (item.ImageBytes != null)
+                    {
+                        image.Source = await CreateBitmapImageAsync(item.ImageBytes);
+                    }
+                    else
+                    {
+                        // Explicitly keep/set thumbnail (or null) so we don't show previous item's image
+                        image.Source = item.Thumbnail;
+                    }
                 }
             }
         }

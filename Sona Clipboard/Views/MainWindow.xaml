@@ -102,7 +102,7 @@
                                        PointerEntered="Thumbnail_PointerEntered">
                                     <ToolTipService.ToolTip>
                                         <ToolTip DataContext="{Binding}" Opened="ThumbnailToolTip_Opened">
-                                            <Image Source="{Binding Thumbnail}" MaxWidth="320" MaxHeight="240" Stretch="Uniform"/>
+                                            <Image x:Name="PreviewTooltipImage" MaxWidth="320" MaxHeight="240" Stretch="Uniform"/>
                                         </ToolTip>
                                     </ToolTipService.ToolTip>
                                 </Image>
