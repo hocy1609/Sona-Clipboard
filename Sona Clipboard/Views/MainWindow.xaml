@@ -230,6 +230,7 @@
                                 </StackPanel>
 
                                 <Button Content="Применить клавиши" Click="ApplyHotKeys_Click"/>
+                                <TextBlock x:Name="HotKeyStatusText" FontSize="12" Opacity="0.7" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
 

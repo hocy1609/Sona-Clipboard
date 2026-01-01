@@ -349,9 +349,100 @@ namespace Sona_Clipboard.Views
             _settingsService.Save();
         }
 
+        private readonly struct HotKeySpec
+        {
+            public HotKeySpec(uint modifiers, uint key, string keyLabel, bool enabled)
+            {
+                Modifiers = modifiers;
+                Key = key;
+                KeyLabel = keyLabel;
+                Enabled = enabled;
+            }
+
+            public uint Modifiers { get; }
+            public uint Key { get; }
+            public string KeyLabel { get; }
+            public bool Enabled { get; }
+        }
+
         private void SetupHotKeys() => RegisterHotKeysFromUI();
-        private void RegisterHotKeysFromUI() { RegisterSingleKey(HotKeyService.ID_NEXT, HkNextCtrl, HkNextShift, HkNextAlt, HkNextKey); RegisterSingleKey(HotKeyService.ID_PREV, HkPrevCtrl, HkPrevShift, HkPrevAlt, HkPrevKey); }
-        private void RegisterSingleKey(int id, CheckBox c, CheckBox s, CheckBox a, ComboBox k) { uint m = 0; if (c.IsChecked == true) m |= HotKeyHelper.MOD_CONTROL; if (s.IsChecked == true) m |= HotKeyHelper.MOD_SHIFT; if (a.IsChecked == true) m |= HotKeyHelper.MOD_ALT; if (m == 0) { _hotKeyService.Unregister(id); return; } _hotKeyService.Register(id, m, (uint)(0x41 + k.SelectedIndex)); }
+
+        private void RegisterHotKeysFromUI()
+        {
+            HotKeyStatusText.Text = string.Empty;
+
+            var nextSpec = BuildHotKeySpec(HkNextCtrl, HkNextShift, HkNextAlt, HkNextKey);
+            var prevSpec = BuildHotKeySpec(HkPrevCtrl, HkPrevShift, HkPrevAlt, HkPrevKey);
+
+            if (nextSpec.Enabled && prevSpec.Enabled && nextSpec.Modifiers == prevSpec.Modifiers && nextSpec.Key == prevSpec.Key)
+            {
+                HotKeyStatusText.Text = "Конфликт: одинаковые горячие клавиши. Измените одну из них.";
+                LogService.Warning("Hotkey conflict: next and prev are identical.");
+                RegisterSingleKey(HotKeyService.ID_NEXT, nextSpec, "Пред. элемент");
+                _hotKeyService.Unregister(HotKeyService.ID_PREV);
+                return;
+            }
+
+            bool nextOk = RegisterSingleKey(HotKeyService.ID_NEXT, nextSpec, "Пред. элемент");
+            bool prevOk = RegisterSingleKey(HotKeyService.ID_PREV, prevSpec, "След. элемент");
+
+            if (nextOk && prevOk)
+            {
+                HotKeyStatusText.Text = "Горячие клавиши активны.";
+            }
+            else if (!nextOk && !prevOk)
+            {
+                HotKeyStatusText.Text = "Не удалось зарегистрировать горячие клавиши. Проверьте конфликты/права.";
+            }
+            else if (!nextOk)
+            {
+                HotKeyStatusText.Text = "Не удалось зарегистрировать горячую клавишу для \"Пред. элемент\".";
+            }
+            else
+            {
+                HotKeyStatusText.Text = "Не удалось зарегистрировать горячую клавишу для \"След. элемент\".";
+            }
+        }
+
+        private static HotKeySpec BuildHotKeySpec(CheckBox c, CheckBox s, CheckBox a, ComboBox k)
+        {
+            uint m = 0;
+            if (c.IsChecked == true) m |= HotKeyHelper.MOD_CONTROL;
+            if (s.IsChecked == true) m |= HotKeyHelper.MOD_SHIFT;
+            if (a.IsChecked == true) m |= HotKeyHelper.MOD_ALT;
+
+            int index = k.SelectedIndex;
+            uint key = index >= 0 ? (uint)(0x41 + index) : 0;
+            string keyLabel = k.SelectedItem?.ToString() ?? string.Empty;
+
+            return new HotKeySpec(m, key, keyLabel, m != 0 && key != 0);
+        }
+
+        private bool RegisterSingleKey(int id, HotKeySpec spec, string label)
+        {
+            if (!spec.Enabled)
+            {
+                _hotKeyService.Unregister(id);
+                return true;
+            }
+
+            bool ok = _hotKeyService.Register(id, spec.Modifiers, spec.Key, out int error);
+            if (!ok)
+            {
+                LogService.Warning($"Failed to register hotkey {label} ({FormatHotKeyLabel(spec)}). Win32 error: {error}");
+            }
+            return ok;
+        }
+
+        private static string FormatHotKeyLabel(HotKeySpec spec)
+        {
+            var parts = new List<string>();
+            if ((spec.Modifiers & HotKeyHelper.MOD_CONTROL) != 0) parts.Add("Ctrl");
+            if ((spec.Modifiers & HotKeyHelper.MOD_SHIFT) != 0) parts.Add("Shift");
+            if ((spec.Modifiers & HotKeyHelper.MOD_ALT) != 0) parts.Add("Alt");
+            if (!string.IsNullOrWhiteSpace(spec.KeyLabel)) parts.Add(spec.KeyLabel);
+            return string.Join("+", parts);
+        }
         private void MainWindow_Closed(object sender, WindowEventArgs args) { args.Handled = true; this.Hide(); }
         private void ExitApp_Internal() { this.Closed -= MainWindow_Closed; _hotKeyService?.Dispose(); _previewWindow?.Close(); this.Close(); Environment.Exit(0); }
         private void BackButton_Click(object sender, RoutedEventArgs e) { SettingsView.Visibility = Visibility.Collapsed; HistoryView.Visibility = Visibility.Visible; }

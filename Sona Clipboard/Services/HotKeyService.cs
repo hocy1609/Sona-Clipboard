@@ -24,10 +24,10 @@ namespace Sona_Clipboard.Services
             SetWindowSubclass(_hWnd, _subclassDelegate, 0, IntPtr.Zero);
         }
 
-        public void Register(int id, uint modifiers, uint key)
+        public bool Register(int id, uint modifiers, uint key, out int error)
         {
             HotKeyHelper.Unregister(_hWnd, id);
-            HotKeyHelper.Register(_hWnd, id, modifiers, key);
+            return HotKeyHelper.Register(_hWnd, id, modifiers, key, out error);
         }
 
         public void Unregister(int id)

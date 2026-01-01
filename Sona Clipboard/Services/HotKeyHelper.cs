@@ -17,9 +17,11 @@ namespace Sona_Clipboard.Services
         public const uint MOD_SHIFT = 0x0004;
         public const uint MOD_WIN = 0x0008;
 
-        public static bool Register(IntPtr hWnd, int id, uint modifiers, uint key)
+        public static bool Register(IntPtr hWnd, int id, uint modifiers, uint key, out int error)
         {
-            return RegisterHotKey(hWnd, id, modifiers, key);
+            bool result = RegisterHotKey(hWnd, id, modifiers, key);
+            error = result ? 0 : Marshal.GetLastWin32Error();
+            return result;
         }
 
         public static bool Unregister(IntPtr hWnd, int id)
