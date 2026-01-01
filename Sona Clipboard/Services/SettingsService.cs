@@ -82,27 +82,25 @@ namespace Sona_Clipboard.Services
         {
             try
             {
-                string taskName = "SonaClipboard";
+                string appName = "SonaClipboard";
                 string exePath = Environment.ProcessPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SonaClipboard.exe");
-                string command = $"'{exePath}'";
-
-                var process = new System.Diagnostics.Process();
-                process.StartInfo.FileName = "schtasks";
-                process.StartInfo.UseShellExecute = true;
-                process.StartInfo.Verb = "runas";
-                process.StartInfo.CreateNoWindow = true;
-
-                if (enable)
+                
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
+                
+                if (key != null)
                 {
-                    process.StartInfo.Arguments = $"/Create /SC ONLOGON /TN \"{taskName}\" /TR \"{command}\" /RL HIGHEST /F";
-                }
-                else
-                {
-                    process.StartInfo.Arguments = $"/Delete /TN \"{taskName}\" /F";
+                    if (enable)
+                    {
+                        key.SetValue(appName, $"\"{exePath}\"");
+                    }
+                    else
+                    {
+                        key.DeleteValue(appName, false);
+                    }
                 }
                 
-                process.Start();
-                CurrentSettings.IsAutoStart = enable;
+CurrentSettings.IsAutoStart = enable;
                 Save();
             }
             catch (Exception ex)

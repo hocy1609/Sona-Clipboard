@@ -21,13 +21,15 @@ using System.Runtime.InteropServices.WindowsRuntime;
 
 using Sona_Clipboard.Services;
 using Sona_Clipboard.Models;
+using Sona_Clipboard.ViewModels;
 
 namespace Sona_Clipboard.Views
 {
     public sealed partial class MainWindow : Window
     {
-        public ICommand ShowWindowCommand { get; }
-        public ICommand ExitAppCommand { get; }
+        public MainWindowViewModel ViewModel { get; private set; }
+        public ICommand ShowWindowCommand { get; private set; }
+        public ICommand ExitAppCommand { get; private set; }
 
         private SettingsService _settingsService;
         private DatabaseService _databaseService;
@@ -59,15 +61,19 @@ namespace Sona_Clipboard.Views
 
             _clipboardService.ClipboardChanged += (item) => AddToHistory(item);
 
-            ShowWindowCommand = new RelayCommand((param) => _uiService.ShowWindow());
-            ExitAppCommand = new RelayCommand((param) => ExitApp_Internal());
-
             this.InitializeComponent();
+
+            // Initialize ViewModel
+            ViewModel = new MainWindowViewModel();
 
             _uiService = new UIService(this);
             _uiService.InitializeWindow("Sona Clipboard", "favicon.ico");
             _uiService.CenterWindow();
 
+            ShowWindowCommand = new RelayCommand((param) => _uiService.ShowWindow());
+            ExitAppCommand = new RelayCommand((param) => ExitApp_Internal());
+
+            // Set DataContext to this Window (for ShowWindowCommand/ExitAppCommand bindings in tray)
             if (this.Content is FrameworkElement root) root.DataContext = this;
             if (TrayIcon?.ContextFlyout is MenuFlyout flyout)
             {
@@ -322,6 +328,7 @@ namespace Sona_Clipboard.Views
             HkPrevCtrl.IsChecked = d.HkPrevCtrl; HkPrevShift.IsChecked = d.HkPrevShift; HkPrevAlt.IsChecked = d.HkPrevAlt; HkPrevKey.SelectedIndex = d.HkPrevKey;
             HistoryLimitBox.Text = d.HistoryLimitGb.ToString("F1");
             AutoStartToggle.IsOn = d.IsAutoStart;
+            RunAsAdminToggle.IsOn = IsRunningAsAdmin();
         }
 
         private void SaveSettingsFromUI()
@@ -350,6 +357,44 @@ namespace Sona_Clipboard.Views
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) { _searchDebounceTimer.Stop(); _searchDebounceTimer.Start(); }
         private void ArchiveSearchCheck_Changed(object sender, RoutedEventArgs e) => LoadHistoryFromDb(SearchBox.Text);
         private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e) { if (sender is ToggleSwitch t) _settingsService.SetAutoStart(t.IsOn); }
+
+        private void RunAsAdminToggle_Toggled(object sender, RoutedEventArgs e)
+        {
+            if (sender is ToggleSwitch t && t.IsOn)
+            {
+                // Check if already running as admin
+                if (IsRunningAsAdmin())
+                {
+                    return; // Already admin, do nothing
+                }
+
+                // Restart with admin rights
+                try
+                {
+                    string exePath = Environment.ProcessPath ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName ?? "";
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = exePath,
+                        UseShellExecute = true,
+                        Verb = "runas"
+                    };
+                    System.Diagnostics.Process.Start(psi);
+                    ExitApp_Internal();
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    // User cancelled UAC
+                    t.IsOn = false;
+                }
+            }
+        }
+
+        private static bool IsRunningAsAdmin()
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new System.Security.Principal.WindowsPrincipal(identity);
+            return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
         private async void ClipboardList_ItemClick(object sender, ItemClickEventArgs e) { if (e.ClickedItem is ClipboardItem i) { _currentPreviewIndex = _fullHistory.IndexOf(i); _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex; _settingsService.Save(); if (i.Type == "Image" && i.ImageBytes == null) i.ImageBytes = await _databaseService.GetFullImageBytesAsync(i.Id); await _clipboardService.CopyToClipboard(i); } }
 
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
