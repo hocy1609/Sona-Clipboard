@@ -76,71 +76,53 @@ namespace Sona_Clipboard.Services
 
             try
             {
-                if (view.Contains(StandardDataFormats.Text))
-                {
-                    string text = await view.GetTextAsync();
-                    if (string.IsNullOrWhiteSpace(text))
-                    {
-                        // Check if it's maybe an image/file before giving up
-                        if (!view.Contains(StandardDataFormats.Bitmap) && !view.Contains(StandardDataFormats.StorageItems))
-                            return;
-                    }
-
-                    string? rtf = view.Contains(StandardDataFormats.Rtf) ? await view.GetRtfAsync() : null;
-                    string? html = view.Contains(StandardDataFormats.Html) ? await view.GetHtmlFormatAsync() : null;
-
-                    ClipboardChanged?.Invoke(new ClipboardItem
-                    {
-                        Type = "Text",
-                        Content = text,
-                        RtfContent = rtf,
-                        HtmlContent = html,
-                        Timestamp = DateTime.Now.ToString("HH:mm"),
-                        SourceAppName = appName,
-                        SourceProcessName = processName
-                    });
-                }
-                else if (view.Contains(StandardDataFormats.StorageItems))
+                if (view.Contains(StandardDataFormats.StorageItems))
                 {
                     var storageItems = await view.GetStorageItemsAsync();
-                    if (storageItems.Count == 0) return;
-
-                    var paths = new List<string>();
-                    long totalSize = 0;
-                    string extensions = "";
-
-                    foreach (var item in storageItems)
+                    if (storageItems.Count > 0)
                     {
-                        if (!string.IsNullOrEmpty(item.Path))
+                        var paths = new List<string>();
+                        long totalSize = 0;
+                        string extensions = "";
+
+                        foreach (var item in storageItems)
                         {
-                            paths.Add(item.Path);
-                            try
+                            if (!string.IsNullOrEmpty(item.Path))
                             {
-                                var info = new FileInfo(item.Path);
-                                if (info.Exists)
+                                paths.Add(item.Path);
+                                try
                                 {
-                                    totalSize += info.Length;
-                                    extensions += info.Extension.ToLower() + " ";
+                                    var info = new FileInfo(item.Path);
+                                    if (info.Exists)
+                                    {
+                                        totalSize += info.Length;
+                                        extensions += info.Extension.ToLower() + " ";
+                                    }
                                 }
+                                catch { }
                             }
-                            catch { }
+                        }
+                        
+                        if (paths.Count > 0)
+                        {
+                            string content = string.Join(Environment.NewLine, paths);
+                            ClipboardChanged?.Invoke(new ClipboardItem
+                            {
+                                Type = "File",
+                                Content = content,
+                                Timestamp = DateTime.Now.ToString("HH:mm"),
+                                SourceAppName = appName,
+                                SourceProcessName = processName,
+                                // Store metadata in a way FTS can index it
+                                RtfContent = $"Size:{totalSize} Ext:{extensions.Trim()}"
+                            });
+                            return; // Success
                         }
                     }
-                    if (paths.Count == 0) return;
-
-                    string content = string.Join(Environment.NewLine, paths);
-                    ClipboardChanged?.Invoke(new ClipboardItem
-                    {
-                        Type = "File",
-                        Content = content,
-                        Timestamp = DateTime.Now.ToString("HH:mm"),
-                        SourceAppName = appName,
-                        SourceProcessName = processName,
-                        // Store metadata in a way FTS can index it
-                        RtfContent = $"Size:{totalSize} Ext:{extensions.Trim()}"
-                    });
+                    // Fallthrough if no valid paths found
                 }
-                else if (view.Contains(StandardDataFormats.Bitmap))
+                
+                if (view.Contains(StandardDataFormats.Bitmap))
                 {
                     RandomAccessStreamReference imageStreamRef = await view.GetBitmapAsync();
                     using (IRandomAccessStreamWithContentType stream = await imageStreamRef.OpenReadAsync())
@@ -164,7 +146,28 @@ namespace Sona_Clipboard.Services
                         };
 
                         ClipboardChanged?.Invoke(item);
+                        return; // Success
                     }
+                }
+                
+                if (view.Contains(StandardDataFormats.Text))
+                {
+                    string text = await view.GetTextAsync();
+                    if (string.IsNullOrWhiteSpace(text)) return;
+
+                    string? rtf = view.Contains(StandardDataFormats.Rtf) ? await view.GetRtfAsync() : null;
+                    string? html = view.Contains(StandardDataFormats.Html) ? await view.GetHtmlFormatAsync() : null;
+
+                    ClipboardChanged?.Invoke(new ClipboardItem
+                    {
+                        Type = "Text",
+                        Content = text,
+                        RtfContent = rtf,
+                        HtmlContent = html,
+                        Timestamp = DateTime.Now.ToString("HH:mm"),
+                        SourceAppName = appName,
+                        SourceProcessName = processName
+                    });
                 }
             }
             catch (Exception ex)

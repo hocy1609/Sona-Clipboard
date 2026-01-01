@@ -47,6 +47,7 @@ namespace Sona_Clipboard.Views
         private ClipboardItem? _selectedPreviewItem;
 
         private int _currentPreviewIndex = 0;
+        private DateTime _lastPasteAt = DateTime.MinValue;
         private DispatcherTimer _releaseCheckTimer;
         private DispatcherTimer _searchDebounceTimer;
 
@@ -125,17 +126,26 @@ namespace Sona_Clipboard.Views
 
             if (!_previewWindow.Visible)
             {
+                // Reset index if idle for too long, but ONLY when opening the window
+                bool shouldResetIndex = (DateTime.UtcNow - _lastPasteAt) > TimeSpan.FromSeconds(3);
+                if (shouldResetIndex)
+                {
+                    _currentPreviewIndex = 0;
+                    _settingsService.CurrentSettings.LastUsedIndex = 0;
+                }
+                else
+                {
+                    _currentPreviewIndex = _settingsService.CurrentSettings.LastUsedIndex;
+                }
                 _releaseCheckTimer.Start();
-                // Restore but also SHIFT if it's not the first time
-                _currentPreviewIndex = _settingsService.CurrentSettings.LastUsedIndex;
             }
 
             // Move index immediately on every hotkey press
             if (goDeeper) _currentPreviewIndex++; else _currentPreviewIndex--;
 
-            // Wrap around
-            if (_currentPreviewIndex < 0) _currentPreviewIndex = _fullHistory.Count - 1;
-            if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = 0;
+            // Clamp (don't wrap around) - UX improvement
+            if (_currentPreviewIndex < 0) _currentPreviewIndex = 0;
+            if (_currentPreviewIndex >= _fullHistory.Count) _currentPreviewIndex = _fullHistory.Count - 1;
 
             // Persist the NEW index
             _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex;
@@ -306,6 +316,7 @@ namespace Sona_Clipboard.Views
 
                                 // Send Ctrl+V
                                 await _keyboardService.PasteSelectionAsync();
+                                _lastPasteAt = DateTime.UtcNow;
                             }
                             catch { }
                             finally
@@ -405,6 +416,57 @@ namespace Sona_Clipboard.Views
 
                 await _clipboardService.CopyToClipboard(i);
             }
+        }
+
+        private async void CopyButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.DataContext is ClipboardItem item)
+            {
+                var originalToolTip = ToolTipService.GetToolTip(button);
+                await EnsureRichContentAsync(item);
+                await _clipboardService.CopyToClipboard(item);
+                _ = ShowCopyFeedbackAsync(button, originalToolTip);
+            }
+        }
+
+        private async Task ShowCopyFeedbackAsync(Button button, object? originalToolTip)
+        {
+            ToolTipService.SetToolTip(button, "Скопировано");
+            await Task.Delay(1500);
+            ToolTipService.SetToolTip(button, originalToolTip);
+        }
+
+        private async void Thumbnail_PointerEntered(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.DataContext is ClipboardItem item)
+            {
+                await EnsureRichContentAsync(item);
+            }
+        }
+
+        private async void ThumbnailToolTip_Opened(object sender, RoutedEventArgs e)
+        {
+            if (sender is ToolTip toolTip && toolTip.DataContext is ClipboardItem item)
+            {
+                await EnsureRichContentAsync(item);
+
+                if (toolTip.Content is Image image && item.ImageBytes != null)
+                {
+                    image.Source = await CreateBitmapImageAsync(item.ImageBytes);
+                }
+            }
+        }
+
+        private static async Task<BitmapImage?> CreateBitmapImageAsync(byte[]? bytes)
+        {
+            if (bytes == null || bytes.Length == 0) return null;
+
+            var bitmap = new BitmapImage();
+            using var stream = new InMemoryRandomAccessStream();
+            await stream.WriteAsync(bytes.AsBuffer());
+            stream.Seek(0);
+            await bitmap.SetSourceAsync(stream);
+            return bitmap;
         }
 
         private async Task EnsureRichContentAsync(ClipboardItem item)
