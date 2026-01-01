@@ -76,29 +76,31 @@ namespace Sona_Clipboard.Services
 
             try
             {
-                if (view.Contains(StandardDataFormats.Text))
+                if (view.Contains(StandardDataFormats.Bitmap))
                 {
-                    string text = await view.GetTextAsync();
-                    if (string.IsNullOrWhiteSpace(text))
+                    RandomAccessStreamReference imageStreamRef = await view.GetBitmapAsync();
+                    using (IRandomAccessStreamWithContentType stream = await imageStreamRef.OpenReadAsync())
                     {
-                        // Check if it's maybe an image/file before giving up
-                        if (!view.Contains(StandardDataFormats.Bitmap) && !view.Contains(StandardDataFormats.StorageItems))
-                            return;
+                        byte[] imageBytes = new byte[stream.Size];
+                        using (DataReader reader = new DataReader(stream)) { await reader.LoadAsync((uint)stream.Size); reader.ReadBytes(imageBytes); }
+
+                        // Generate Thumbnail (max 100px)
+                        byte[]? thumbBytes = await CreateThumbnailAsync(imageStreamRef, 100);
+
+                        var item = new ClipboardItem
+                        {
+                            Type = "Image",
+                            Content = "Image " + DateTime.Now.ToString("HH:mm"),
+                            ImageBytes = imageBytes,
+                            ThumbnailBytes = thumbBytes,
+                            Timestamp = DateTime.Now.ToString("HH:mm"),
+                            Thumbnail = await BytesToImage(thumbBytes ?? imageBytes), // Show thumb in UI
+                            SourceAppName = appName,
+                            SourceProcessName = processName
+                        };
+
+                        ClipboardChanged?.Invoke(item);
                     }
-
-                    string? rtf = view.Contains(StandardDataFormats.Rtf) ? await view.GetRtfAsync() : null;
-                    string? html = view.Contains(StandardDataFormats.Html) ? await view.GetHtmlFormatAsync() : null;
-
-                    ClipboardChanged?.Invoke(new ClipboardItem
-                    {
-                        Type = "Text",
-                        Content = text,
-                        RtfContent = rtf,
-                        HtmlContent = html,
-                        Timestamp = DateTime.Now.ToString("HH:mm"),
-                        SourceAppName = appName,
-                        SourceProcessName = processName
-                    });
                 }
                 else if (view.Contains(StandardDataFormats.StorageItems))
                 {
@@ -140,31 +142,27 @@ namespace Sona_Clipboard.Services
                         RtfContent = $"Size:{totalSize} Ext:{extensions.Trim()}"
                     });
                 }
-                else if (view.Contains(StandardDataFormats.Bitmap))
+                else if (view.Contains(StandardDataFormats.Text))
                 {
-                    RandomAccessStreamReference imageStreamRef = await view.GetBitmapAsync();
-                    using (IRandomAccessStreamWithContentType stream = await imageStreamRef.OpenReadAsync())
+                    string text = await view.GetTextAsync();
+                    if (string.IsNullOrWhiteSpace(text))
                     {
-                        byte[] imageBytes = new byte[stream.Size];
-                        using (DataReader reader = new DataReader(stream)) { await reader.LoadAsync((uint)stream.Size); reader.ReadBytes(imageBytes); }
-
-                        // Generate Thumbnail (max 100px)
-                        byte[]? thumbBytes = await CreateThumbnailAsync(imageStreamRef, 100);
-
-                        var item = new ClipboardItem
-                        {
-                            Type = "Image",
-                            Content = "Image " + DateTime.Now.ToString("HH:mm"),
-                            ImageBytes = imageBytes,
-                            ThumbnailBytes = thumbBytes,
-                            Timestamp = DateTime.Now.ToString("HH:mm"),
-                            Thumbnail = await BytesToImage(thumbBytes ?? imageBytes), // Show thumb in UI
-                            SourceAppName = appName,
-                            SourceProcessName = processName
-                        };
-
-                        ClipboardChanged?.Invoke(item);
+                        return;
                     }
+
+                    string? rtf = view.Contains(StandardDataFormats.Rtf) ? await view.GetRtfAsync() : null;
+                    string? html = view.Contains(StandardDataFormats.Html) ? await view.GetHtmlFormatAsync() : null;
+
+                    ClipboardChanged?.Invoke(new ClipboardItem
+                    {
+                        Type = "Text",
+                        Content = text,
+                        RtfContent = rtf,
+                        HtmlContent = html,
+                        Timestamp = DateTime.Now.ToString("HH:mm"),
+                        SourceAppName = appName,
+                        SourceProcessName = processName
+                    });
                 }
             }
             catch (Exception ex)
