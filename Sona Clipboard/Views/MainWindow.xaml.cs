@@ -349,6 +349,16 @@ namespace Sona_Clipboard.Views
         private async void ApplyLimit_Click(object sender, RoutedEventArgs e) { await TrimHistoryAsync(); SaveSettingsFromUI(); MaintenanceStatus.Text = "Лимит применен"; }
         private async void PinButton_Click(object sender, RoutedEventArgs e) { if (sender is Button b && b.DataContext is ClipboardItem i) { i.IsPinned = !i.IsPinned; await _databaseService.TogglePinAsync(i.Id, i.IsPinned); LoadHistoryFromDb(); } }
         private async void DeleteButton_Click(object sender, RoutedEventArgs e) { if (sender is Button b && b.DataContext is ClipboardItem i) { await _databaseService.DeleteItemAsync(i.Id); _fullHistory.Remove(i); LoadHistoryFromDb(); } }
+        private async void CopyButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button && button.DataContext is ClipboardItem item)
+            {
+                var originalToolTip = ToolTipService.GetToolTip(button);
+                await EnsureRichContentAsync(item);
+                await _clipboardService.CopyToClipboard(item);
+                _ = ShowCopyFeedbackAsync(button, originalToolTip);
+            }
+        }
         private async void ClearHistory_Click(object sender, RoutedEventArgs e) { await _databaseService.ClearAllAsync(); LoadHistoryFromDb(); }
         private async void RemoveDuplicates_Click(object sender, RoutedEventArgs e) { await _databaseService.RemoveDuplicatesAsync(); LoadHistoryFromDb(); }
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) { _searchDebounceTimer.Stop(); _searchDebounceTimer.Start(); }
@@ -429,6 +439,13 @@ namespace Sona_Clipboard.Views
                     System.Diagnostics.Debug.WriteLine($"[PERF] LazyLoaded {size} chars of RTF/HTML for Item {item.Id} in {stopwatch.ElapsedMilliseconds}ms");
                 }
             }
+        }
+
+        private async Task ShowCopyFeedbackAsync(Button button, object? originalToolTip)
+        {
+            ToolTipService.SetToolTip(button, "Скопировано");
+            await Task.Delay(1500);
+            ToolTipService.SetToolTip(button, originalToolTip);
         }
 
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);

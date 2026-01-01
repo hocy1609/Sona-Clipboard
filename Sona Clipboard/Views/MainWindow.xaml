@@ -101,6 +101,8 @@
                                 <Image Source="{Binding Thumbnail}" Grid.Column="2" Height="30" Width="40" Stretch="Uniform" Margin="10,0,0,0"/>
 
                                 <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="10,0,0,0" Spacing="4">
+                                    <Button Content="📋" Padding="4"
+                                            Click="CopyButton_Click" ToolTipService.ToolTip="Скопировать"/>
                                     <Button Content="📌" Padding="4" 
                                             Click="PinButton_Click" ToolTipService.ToolTip="Закрепить/Открепить"/>
                                     <Button Content="🗑️" Foreground="Red" Padding="4"
