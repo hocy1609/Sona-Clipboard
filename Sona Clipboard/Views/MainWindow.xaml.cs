@@ -367,6 +367,7 @@ namespace Sona_Clipboard.Views
             {
                 item.ImageBytes = await _databaseService.GetFullImageBytesAsync(item.Id);
             }
+            // Lazy load rich text if it's missing (checking both avoids re-fetching if one is naturally null)
             else if (item.Type == "Text" && item.RtfContent == null && item.HtmlContent == null)
             {
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
