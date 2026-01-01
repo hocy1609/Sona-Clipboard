@@ -283,10 +283,7 @@ namespace Sona_Clipboard.Views
                     // 1. Data Prep in background
                     Task.Run(async () =>
                     {
-                        if (itemToPaste.Type == "Image" && itemToPaste.ImageBytes == null)
-                        {
-                            itemToPaste.ImageBytes = await _databaseService.GetFullImageBytesAsync(itemToPaste.Id);
-                        }
+                        await EnsureRichContentAsync(itemToPaste);
 
                         // 2. Clipboard & Paste on UI Thread
                         this.DispatcherQueue.TryEnqueue(async () =>
@@ -350,7 +347,42 @@ namespace Sona_Clipboard.Views
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) { _searchDebounceTimer.Stop(); _searchDebounceTimer.Start(); }
         private void ArchiveSearchCheck_Changed(object sender, RoutedEventArgs e) => LoadHistoryFromDb(SearchBox.Text);
         private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e) { if (sender is ToggleSwitch t) _settingsService.SetAutoStart(t.IsOn); }
-        private async void ClipboardList_ItemClick(object sender, ItemClickEventArgs e) { if (e.ClickedItem is ClipboardItem i) { _currentPreviewIndex = _fullHistory.IndexOf(i); _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex; _settingsService.Save(); if (i.Type == "Image" && i.ImageBytes == null) i.ImageBytes = await _databaseService.GetFullImageBytesAsync(i.Id); await _clipboardService.CopyToClipboard(i); } }
+        private async void ClipboardList_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is ClipboardItem i)
+            {
+                _currentPreviewIndex = _fullHistory.IndexOf(i);
+                _settingsService.CurrentSettings.LastUsedIndex = _currentPreviewIndex;
+                _settingsService.Save();
+
+                await EnsureRichContentAsync(i);
+
+                await _clipboardService.CopyToClipboard(i);
+            }
+        }
+
+        private async Task EnsureRichContentAsync(ClipboardItem item)
+        {
+            if (item.Type == "Image" && item.ImageBytes == null)
+            {
+                item.ImageBytes = await _databaseService.GetFullImageBytesAsync(item.Id);
+            }
+            else if (item.Type == "Text" && item.RtfContent == null && item.HtmlContent == null)
+            {
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var (rtf, html) = await _databaseService.GetFullTextContentAsync(item.Id);
+                stopwatch.Stop();
+
+                if (rtf != null) item.RtfContent = rtf;
+                if (html != null) item.HtmlContent = html;
+
+                if (rtf != null || html != null)
+                {
+                    int size = (rtf?.Length ?? 0) + (html?.Length ?? 0);
+                    System.Diagnostics.Debug.WriteLine($"[PERF] LazyLoaded {size} chars of RTF/HTML for Item {item.Id} in {stopwatch.ElapsedMilliseconds}ms");
+                }
+            }
+        }
 
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
     }
