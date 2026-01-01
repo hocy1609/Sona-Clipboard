@@ -407,6 +407,42 @@ namespace Sona_Clipboard.Views
             }
         }
 
+        private async void Thumbnail_PointerEntered(object sender, PointerRoutedEventArgs e)
+        {
+            if (sender is FrameworkElement element && element.DataContext is ClipboardItem item)
+            {
+                await EnsureRichContentAsync(item);
+            }
+        }
+
+        private async void ThumbnailToolTip_Opened(object sender, RoutedEventArgs e)
+        {
+            if (sender is ToolTip toolTip && toolTip.DataContext is ClipboardItem item)
+            {
+                await EnsureRichContentAsync(item);
+
+                if (toolTip.Content is Image image && item.ImageBytes != null)
+                {
+                    image.Source = await CreateBitmapImageAsync(item.ImageBytes);
+                }
+            }
+        }
+
+        private static async Task<BitmapImage?> CreateBitmapImageAsync(byte[]? bytes)
+        {
+            if (bytes == null || bytes.Length == 0)
+            {
+                return null;
+            }
+
+            var bitmap = new BitmapImage();
+            using var stream = new InMemoryRandomAccessStream();
+            await stream.WriteAsync(bytes.AsBuffer());
+            stream.Seek(0);
+            await bitmap.SetSourceAsync(stream);
+            return bitmap;
+        }
+
         private async Task EnsureRichContentAsync(ClipboardItem item)
         {
             if (item.Type == "Image" && item.ImageBytes == null)
