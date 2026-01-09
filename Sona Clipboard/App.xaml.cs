@@ -1,7 +1,7 @@
 ﻿using System;
 using Microsoft.UI.Xaml;
-using Sona_Clipboard.Views;
 using Sona_Clipboard.Services;
+using Sona_Clipboard.Views;
 
 namespace Sona_Clipboard
 {
@@ -25,9 +25,15 @@ namespace Sona_Clipboard
 
         private void ConfigureServices()
         {
-            // Register all services as singletons
-            Services.RegisterSingleton(new SettingsService());
-            Services.RegisterSingleton(new DatabaseService());
+            // Register SettingsService first and load settings
+            var settingsService = new SettingsService();
+            settingsService.Load();
+            Services.RegisterSingleton(settingsService);
+
+            // Pass database path from settings to DatabaseService
+            string dbPath = settingsService.CurrentSettings.DatabasePath;
+            Services.RegisterSingleton(new DatabaseService(string.IsNullOrWhiteSpace(dbPath) ? null : dbPath));
+
             Services.RegisterSingleton(new ClipboardService());
             Services.RegisterSingleton(new KeyboardService());
             Services.RegisterSingleton(new BackupService());

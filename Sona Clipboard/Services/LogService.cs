@@ -10,14 +10,15 @@ namespace Sona_Clipboard.Services
     {
         private static readonly string _logPath;
         private static readonly object _lock = new object();
-        private static LogLevel _minLevel = LogLevel.Info;
+        private static LogLevel _minLevel = LogLevel.Error; // Production mode
 
         static LogService()
         {
+            // Портабельная версия — логи в папке программы
             string logDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SonaClipboard", "Logs");
-            
+                AppDomain.CurrentDomain.BaseDirectory,
+                "Logs");
+
             Directory.CreateDirectory(logDir);
             _logPath = Path.Combine(logDir, $"sona_{DateTime.Now:yyyyMMdd}.log");
         }
@@ -36,12 +37,12 @@ namespace Sona_Clipboard.Services
         private static void Log(LogLevel level, string message)
         {
             if (level < _minLevel) return;
-            
+
             try
             {
                 string line = $"[{DateTime.Now:HH:mm:ss}] [{level}] {message}";
                 System.Diagnostics.Debug.WriteLine(line);
-                
+
                 lock (_lock)
                 {
                     File.AppendAllText(_logPath, line + Environment.NewLine, Encoding.UTF8);

@@ -1,3 +1,11 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading.Tasks;
+using System.Windows.Input;
 using H.NotifyIcon;
 using Microsoft.Data.Sqlite;
 using Microsoft.UI;
@@ -6,22 +14,13 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Threading.Tasks;
+using Sona_Clipboard.Models;
+using Sona_Clipboard.Services;
+using Sona_Clipboard.ViewModels;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.Storage.Streams;
 using WinRT.Interop;
-using System.Windows.Input;
-using System.Runtime.InteropServices.WindowsRuntime;
-
-using Sona_Clipboard.Services;
-using Sona_Clipboard.Models;
-using Sona_Clipboard.ViewModels;
 
 namespace Sona_Clipboard.Views
 {
@@ -337,6 +336,30 @@ namespace Sona_Clipboard.Views
             HistoryLimitBox.Text = d.HistoryLimitGb.ToString("F1");
             AutoStartToggle.IsOn = d.IsAutoStart;
             RunAsAdminToggle.IsOn = IsRunningAsAdmin();
+            DbPathBox.Text = d.DatabasePath ?? "";
+        }
+
+        private async void BrowseDbPath_Click(object sender, RoutedEventArgs e)
+        {
+            var folderPicker = new Windows.Storage.Pickers.FolderPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(folderPicker, _hWnd);
+            folderPicker.SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary;
+            folderPicker.FileTypeFilter.Add("*");
+
+            var folder = await folderPicker.PickSingleFolderAsync();
+            if (folder != null)
+            {
+                DbPathBox.Text = folder.Path;
+            }
+        }
+
+        private void ApplyDbPath_Click(object sender, RoutedEventArgs e)
+        {
+            string newPath = DbPathBox.Text.Trim();
+            _settingsService.CurrentSettings.DatabasePath = newPath;
+            _settingsService.Save();
+
+            DbPathStatusText.Text = "Сохранено! Перезапустите приложение.";
         }
 
         private void SaveSettingsFromUI()

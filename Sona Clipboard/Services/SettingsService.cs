@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.Text.Json;
-using Microsoft.UI.Xaml.Controls;
 
 namespace Sona_Clipboard.Services
 {
@@ -21,6 +20,10 @@ namespace Sona_Clipboard.Services
         public int LastUsedIndex { get; set; } = 0;
         public bool IsFirstRun { get; set; } = true;
         public bool IsAutoStart { get; set; } = false;
+
+        // Путь к базе данных (пустой = папка приложения)
+
+        public string DatabasePath { get; set; } = "";
     }
 
     public class SettingsService
@@ -31,9 +34,9 @@ namespace Sona_Clipboard.Services
 
         public SettingsService()
         {
+            // Портабельная версия — всё храним в папке программы
             _settingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SonaClipboard",
+                AppDomain.CurrentDomain.BaseDirectory,
                 "settings.json");
 
             CurrentSettings = new AppSettingsData();
@@ -84,10 +87,12 @@ namespace Sona_Clipboard.Services
             {
                 string appName = "SonaClipboard";
                 string exePath = Environment.ProcessPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SonaClipboard.exe");
-                
+
+
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                     @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-                
+
+
                 if (key != null)
                 {
                     if (enable)
@@ -99,8 +104,8 @@ namespace Sona_Clipboard.Services
                         key.DeleteValue(appName, false);
                     }
                 }
-                
-CurrentSettings.IsAutoStart = enable;
+
+                CurrentSettings.IsAutoStart = enable;
                 Save();
             }
             catch (Exception ex)

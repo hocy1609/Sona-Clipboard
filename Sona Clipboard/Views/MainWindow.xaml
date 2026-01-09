@@ -151,7 +151,23 @@
                                            FontSize="10" Opacity="0.5" TextWrapping="Wrap"/>
                                 <TextBlock Text="База данных" FontWeight="Bold" Margin="0,10,0,0"/>
                                 <TextBlock x:Name="DbPathText" TextWrapping="Wrap" Opacity="0.7" FontSize="11"/>
-                                <Button Content="Открыть папку" Click="OpenFolder_Click"/>
+                                
+                                <TextBlock Text="Путь к базе данных:" Opacity="0.7" Margin="0,8,0,0"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="DbPathBox" PlaceholderText="Оставьте пустым для папки приложения" FontSize="12"/>
+                                    <Button Content="📁" Grid.Column="1" Margin="5,0,0,0" Click="BrowseDbPath_Click" ToolTipService.ToolTip="Выбрать папку"/>
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,5,0,0">
+                                    <Button Content="Применить путь" Click="ApplyDbPath_Click"/>
+                                    <TextBlock x:Name="DbPathStatusText" VerticalAlignment="Center" FontSize="11" Foreground="Orange"/>
+                                </StackPanel>
+                                <TextBlock Text="* Требуется перезапуск приложения" FontSize="10" Opacity="0.5"/>
+                                
+                                <Button Content="Открыть папку" Click="OpenFolder_Click" Margin="0,5,0,0"/>
                             </StackPanel>
                         </Border>
 

@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
 using Microsoft.UI.Xaml.Media.Imaging;
-using System.Threading.Tasks;
-using Windows.Storage.Streams;
-using System.Runtime.InteropServices.WindowsRuntime;
 using Sona_Clipboard.Models;
+using Windows.Storage.Streams;
 
 namespace Sona_Clipboard.Services
 {
@@ -16,9 +16,35 @@ namespace Sona_Clipboard.Services
 
         public string DbPath => _dbPath;
 
-        public DatabaseService()
+        /// <summary>
+        /// Инициализирует DatabaseService.
+        /// </summary>
+        /// <param name="customDbPath">Путь к файлу БД (пустой = папка приложения)</param>
+        public DatabaseService(string? customDbPath = null)
         {
-            _dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SonaClipboard.db");
+            // Если путь указан и это директория — добавляем имя файла
+            if (!string.IsNullOrWhiteSpace(customDbPath))
+            {
+                if (Directory.Exists(customDbPath))
+                {
+                    _dbPath = Path.Combine(customDbPath, "SonaClipboard.db");
+                }
+                else if (customDbPath.EndsWith(".db", StringComparison.OrdinalIgnoreCase))
+                {
+                    _dbPath = customDbPath;
+                }
+                else
+                {
+                    // Это директория которая ещё не существует
+                    Directory.CreateDirectory(customDbPath);
+                    _dbPath = Path.Combine(customDbPath, "SonaClipboard.db");
+                }
+            }
+            else
+            {
+                _dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "SonaClipboard.db");
+            }
+
             // Initialize synchronously during startup to ensure DB exists
             InitializeDatabase();
         }
@@ -240,13 +266,13 @@ namespace Sona_Clipboard.Services
                                  FROM Arc.History h
                                  -- Note: Archive FTS would need separate virtual table, but we'll use LIKE for archive for simplicity or simple FTS if created
                                  WHERE h.Content LIKE @likeQuery
-                                 ORDER BY IsPinned DESC, Id DESC LIMIT 100";
+                                 ORDER BY IsPinned DESC, Timestamp DESC LIMIT 100";
                     }
                     else
                     {
                         if (string.IsNullOrWhiteSpace(searchQuery))
                         {
-                            sql = "SELECT Id, Type, Content, Timestamp, IsPinned, ThumbnailBytes, SourceAppName FROM History ORDER BY IsPinned DESC, Id DESC LIMIT 100";
+                            sql = "SELECT Id, Type, Content, Timestamp, IsPinned, ThumbnailBytes, SourceAppName FROM History ORDER BY IsPinned DESC, Timestamp DESC LIMIT 100";
                         }
                         else
                         {
@@ -254,7 +280,7 @@ namespace Sona_Clipboard.Services
                                      FROM History h
                                      JOIN History_FTS f ON f.rowid = h.Id
                                      WHERE {ftsQuery}
-                                     ORDER BY h.IsPinned DESC, h.Id DESC LIMIT 100";
+                                     ORDER BY h.IsPinned DESC, h.Timestamp DESC LIMIT 100";
                         }
                     }
 

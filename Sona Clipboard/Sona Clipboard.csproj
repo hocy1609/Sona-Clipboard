@@ -5,8 +5,15 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>SonaClipboard</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Platforms>x86;x64;ARM64</Platforms>
-    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+    
+    <!-- Только x64 платформа -->
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    
+    <!-- По умолчанию Release конфигурация -->
+    <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+    
     <UseWinUI>true</UseWinUI>
     <Nullable>enable</Nullable>
 
@@ -22,7 +29,9 @@
     
     <AssemblyTitle>SonaClipboard</AssemblyTitle>
     
-    <BaseOutputPath>Test\</BaseOutputPath>
+    <!-- Выходная папка 11 -->
+    <BaseOutputPath>11\</BaseOutputPath>
+    <OutputPath>11\</OutputPath>
     
     <PackageIcon>1609 Logo Dark .jpeg</PackageIcon> 
   </PropertyGroup>
